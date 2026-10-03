@@ -9,7 +9,7 @@
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="assets/icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="assets/icon-192.png">
-  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="styles.css?v=1.0.8">
   <link rel="stylesheet" href="enhancements.css?v=1.0.6">
 </head>
 <body>
@@ -130,7 +130,7 @@
           <div id="returnMetrics" class="metric-grid"></div>
           <div class="dashboard-grid">
             <article class="card"><div class="card-heading"><div><p class="eyebrow">P&amp;L BRIDGE</p><h2>損益組成</h2></div></div><div id="pnlBridge" class="bridge-chart"></div></article>
-            <article class="card"><div class="card-heading"><div><p class="eyebrow">BY ACCOUNT</p><h2>帳戶成果</h2></div></div><div id="accountPerformance" class="account-performance"></div></article>
+            <article class="card"><div class="card-heading"><div><p class="eyebrow">BY ACCOUNT</p><h2>分帳損益</h2></div><span class="section-note">已實現・未實現・總損益</span></div><div id="accountPerformance" class="account-performance"></div></article>
           </div>
         </div>
         <div id="qualityPanel" hidden>
@@ -154,7 +154,7 @@
           <article class="card"><div class="card-heading"><div><p class="eyebrow">CAPITAL</p><h2>信貸與資金來源</h2></div></div><form id="capitalForm" class="form-grid"></form></article>
           <article class="card"><div class="card-heading"><div><p class="eyebrow">MARKET DATA</p><h2>自動更新美股行情</h2></div></div><p class="market-description">使用個人的 Finnhub API 金鑰；只存在這台裝置，不會放進匯出 JSON。開啟 App 時補抓缺少或較舊的美股報價，台股仍可手動更新。報價可能延遲，以顯示的行情時間為準。</p><form id="marketKeyForm" class="form-grid"><div class="field"><label for="marketKey">Finnhub API 金鑰</label><input id="marketKey" type="password" autocomplete="off" placeholder="貼上金鑰；已設定時可留白"></div><div class="data-actions"><button class="button button-primary" type="submit">儲存並抓取行情</button><button class="button button-soft" type="button" id="removeMarketKey">移除金鑰</button></div></form><p id="marketKeyStatus" class="market-description"></p><a class="market-help" href="https://finnhub.io/register" target="_blank" rel="noopener noreferrer">取得個人 API 金鑰 ↗</a></article>
           <article class="card data-card"><div class="card-heading"><div><p class="eyebrow">DATA</p><h2>資料與備份</h2></div></div><p>所有私人紀錄只存在目前瀏覽器。換手機或清除網站資料前，請先匯出完整JSON。</p><div class="data-actions"><button class="button button-primary" id="exportButton"><span data-icon="download"></span>匯出完整備份</button><button class="button button-soft" id="settingsImportButton"><span data-icon="upload"></span>合併匯入</button><button class="button button-danger" id="resetButton">清除本機資料</button></div></article>
-            <article class="card"><div class="card-heading"><div><p class="eyebrow">ABOUT</p><h2>計算口徑</h2></div></div><ul class="rules"><li>股票採移動平均成本法。</li><li>同一帳戶、代號與幣別的連續持倉，歸零才算一筆完整交易。</li><li>未平倉不計勝率；沒有原始停損時，R multiple維持N/A。</li><li>幣安總損益以「最新資產－累計投入」為主，已實現用完整策略紀錄拆分。</li><li>信貸本金不是虧損；只有利息與手續費列入融資成本。</li></ul><div class="version-row"><span>Wealth Ledger</span><strong>v1.0.7</strong></div></article>
+            <article class="card"><div class="card-heading"><div><p class="eyebrow">ABOUT</p><h2>計算口徑</h2></div></div><ul class="rules"><li>股票採移動平均成本法。</li><li>同一帳戶、代號與幣別的連續持倉，歸零才算一筆完整交易。</li><li>未平倉不計勝率；沒有原始停損時，R multiple維持N/A。</li><li>幣安總損益以「最新資產－累計投入」為主，已實現用完整策略紀錄拆分。</li><li>信貸本金不是虧損；只有利息與手續費列入融資成本。</li></ul><div class="version-row"><span>Wealth Ledger</span><strong>v1.0.8</strong></div></article>
         </div>
       </section>
     </main>
@@ -192,6 +192,6 @@
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
   <script src="ledger.js"></script>
   <script src="market.js?v=1.0.7"></script>
-  <script src="app.js?v=1.0.7"></script>
+  <script src="app.js?v=1.0.8"></script>
 </body>
 </html>
