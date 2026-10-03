@@ -1,6 +1,6 @@
 (() => {
   'use strict';
-  const APP_VERSION = '1.0.3';
+  const APP_VERSION = '1.0.4';
   const STORAGE_KEY = 'wealth-ledger-db-v1';
   const state = { view: 'overview', holdingFilter: 'all', transactionFilter: 'all', performanceMode: 'returns', performanceScope: 'all', demo: false };
   let installPrompt = null;
@@ -251,7 +251,7 @@
   }
 
   function performanceTrades(p){
-    const stock=p.computed.trades.map(t=>({...t,account:'stock'}));
+    const stock=p.computed.trades.map(t=>({...t,kind:'stock'}));
     return {stock,crypto:p.cryptoTrades,all:[...stock,...p.cryptoTrades]};
   }
 
@@ -267,7 +267,7 @@
     const groups=performanceTrades(p);const selected=groups[state.performanceScope];const stats=qualityStats(selected);
     $('qualityMetrics').innerHTML=[metric('完整交易',`${stats.count} 筆`,`${stats.ratedCount}筆有報酬率`),metric('勝率',percent(stats.winRate,1),'已平倉樣本',tone(stats.winRate-50)),metric('平均獲利',percent(stats.avgWin),'獲利交易'),metric('平均虧損',finite(stats.avgLoss)?`-${Number(stats.avgLoss).toFixed(2)}%`:'—','虧損交易','negative'),metric('Payoff',finite(stats.payoff)?`${stats.payoff.toFixed(2)} : 1`:'—','平均獲利率÷平均虧損率'),metric('Expectancy',percent(stats.expectancy),'每筆期望值',tone(stats.expectancy)),metric('Profit Factor',finite(stats.profitFactor)?stats.profitFactor.toFixed(2):'—','總獲利÷總虧損',tone(stats.profitFactor-1)),metric('最大回撤',`${signedMoney(stats.maxDrawdown)} 元`,`${stats.maxWinStreak}連勝・${stats.maxLossStreak}連敗`,'negative')].join('');
     const rows=[...selected].sort((a,b)=>dateValue(b.close)-dateValue(a.close));
-    $('closedTradesTable').innerHTML=`<thead><tr><th>平倉日</th><th>標的</th><th>類別</th><th>持有時間</th><th>損益 TWD</th><th>報酬率</th><th>R</th></tr></thead><tbody>${rows.length?rows.map(t=>`<tr><td>${escapeHtml(String(t.close).slice(0,10))}</td><td>${escapeHtml(t.ticker)}</td><td><span class="account-chip ${t.account==='crypto'?'crypto':'swing'}">${t.account==='crypto'?'幣安':'股票波段'}</span></td><td>${finite(t.holdHours)?formatDuration(t.holdHours):'—'}</td><td class="${tone(t.realizedTwd)}">${signedMoney(t.realizedTwd)}</td><td class="${tone(t.returnPct)}">${percent(t.returnPct)}</td><td>${finite(t.rMultiple)?Number(t.rMultiple).toFixed(2):'N/A'}</td></tr>`).join(''):'<tr><td colspan="7" class="empty-row">尚無完整交易</td></tr>'}</tbody>`;
+    $('closedTradesTable').innerHTML=`<thead><tr><th>平倉日</th><th>標的</th><th>類別</th><th>持有時間</th><th>損益 TWD</th><th>報酬率</th><th>R</th></tr></thead><tbody>${rows.length?rows.map(t=>`<tr><td>${escapeHtml(String(t.close).slice(0,10))}</td><td>${escapeHtml(t.ticker)}</td><td><span class="account-chip ${t.account==='crypto'?'crypto':t.account==='波段'?'swing':''}">${t.account==='crypto'?'幣安':t.account==='長期'?'股票長期':'股票波段'}</span></td><td>${finite(t.holdHours)?formatDuration(t.holdHours):'—'}</td><td class="${tone(t.realizedTwd)}">${signedMoney(t.realizedTwd)}</td><td class="${tone(t.returnPct)}">${percent(t.returnPct)}</td><td>${finite(t.rMultiple)?Number(t.rMultiple).toFixed(2):'N/A'}</td></tr>`).join(''):'<tr><td colspan="7" class="empty-row">尚無完整交易</td></tr>'}</tbody>`;
   }
 
   function formatDuration(hours){
@@ -310,7 +310,7 @@
   }
 
   function openTradeDialog(){
-    $('tradeFields').innerHTML=`${inputField('tradeDate','日期時間',isoLocal(),'datetime-local','required')}${inputField('tradeTicker','股票代號','','text','required placeholder="例如 ABC"')}<div class="field"><label for="tradeAccount">資金帳戶</label><select id="tradeAccount" name="tradeAccount"><option value="波段">波段</option><option value="長期">長期</option></select></div><div class="field"><label for="tradeSide">動作</label><select id="tradeSide" name="tradeSide"><option value="BUY">買進</option><option value="SELL">賣出</option><option value="INIT">期初持倉</option></select></div><div class="field"><label for="tradeAsset">資產類型</label><select id="tradeAsset" name="tradeAsset"><option>美股</option><option>台股</option><option>ETF</option></select></div>${inputField('tradeQty','數量','', 'number','step="any" min="0" required')}${inputField('tradePrice','成交價格','', 'number','step="any" min="0" required')}${inputField('tradeFee','手續費',0,'number','step="any" min="0"')}${inputField('tradeTax','交易稅',0,'number','step="any" min="0"')}<div class="field"><label for="tradeCurrency">計價幣別</label><select id="tradeCurrency" name="tradeCurrency"><option value="USD">USD</option><option value="TWD">TWD</option></select></div>${inputField('tradeFx','成交匯率',currentFx(),'number','step="any" min="0" required')}<div class="field full"><label><input id="tradePending" name="tradePending" type="checkbox" style="width:auto;min-height:auto;margin-right:7px">尚未從銀行扣款／入帳，加入待交割</label></div>`;
+    $('tradeFields').innerHTML=`${inputField('tradeDate','日期時間',isoLocal(),'datetime-local','required')}${inputField('tradeTicker','股票代號','','text','required placeholder="例如 ABC"')}<div class="field"><label for="tradeAccount">資金帳戶</label><select id="tradeAccount" name="tradeAccount"><option value="波段">波段</option><option value="長期">長期</option></select></div><div class="field"><label for="tradeSide">動作</label><select id="tradeSide" name="tradeSide"><option value="BUY">買進</option><option value="SELL">賣出</option><option value="INIT">期初持倉</option></select></div><div class="field"><label for="tradeAsset">資產類型</label><select id="tradeAsset" name="tradeAsset"><option>美股</option><option>台股</option><option>ETF</option></select></div>${inputField('tradeQty','數量','', 'number','step="any" min="0" required')}${inputField('tradePrice','成交價格','', 'number','step="any" min="0" required')}${inputField('tradeFee','手續費',0,'number','step="any" min="0"')}${inputField('tradeTax','交易稅',0,'number','step="any" min="0"')}<div class="field"><label for="tradeCurrency">計價幣別</label><select id="tradeCurrency" name="tradeCurrency"><option value="USD">USD</option><option value="TWD">TWD</option></select></div>${inputField('tradeFx','成交匯率',currentFx()>1?currentFx():'','number','step="any" min="0.000001" required')}<div class="field full"><label><input id="tradePending" name="tradePending" type="checkbox" style="width:auto;min-height:auto;margin-right:7px">尚未從銀行扣款／入帳，加入待交割</label></div>`;
     $('tradeTicker').addEventListener('input',()=>{const ticker=$('tradeTicker').value.trim().toUpperCase();const known=db.transactions.find(t=>t.ticker===ticker);if(known)$('tradeAccount').value=known.account;});
     $('tradeDialog').showModal();
   }
@@ -361,7 +361,7 @@
 
   function openQuoteDialog(){
     const tickers=[...new Set(Ledger.compute(db).positions.filter(p=>p.qty>1e-9).map(p=>p.ticker))];
-    $('quoteFields').innerHTML=`<div class="field"><label for="quoteTicker">股票代號</label><input id="quoteTicker" name="quoteTicker" list="quoteTickers" required placeholder="例如 AVGO"><datalist id="quoteTickers">${tickers.map(t=>`<option value="${escapeHtml(t)}">`).join('')}</datalist></div>${inputField('quotePrice','目前價格','', 'number','step="any" min="0" required')}<div class="field"><label for="quoteCurrency">計價幣別</label><select id="quoteCurrency" name="quoteCurrency"><option value="USD">USD</option><option value="TWD">TWD</option></select></div>${inputField('quoteFx','USD/TWD 匯率',currentFx(),'number','step="any" min="0" required')}`;
+    $('quoteFields').innerHTML=`<div class="field"><label for="quoteTicker">股票代號</label><input id="quoteTicker" name="quoteTicker" list="quoteTickers" required placeholder="例如 ABC"><datalist id="quoteTickers">${tickers.map(t=>`<option value="${escapeHtml(t)}">`).join('')}</datalist></div>${inputField('quotePrice','目前價格','', 'number','step="any" min="0" required')}<div class="field"><label for="quoteCurrency">計價幣別</label><select id="quoteCurrency" name="quoteCurrency"><option value="USD">USD</option><option value="TWD">TWD</option></select></div>${inputField('quoteFx','USD/TWD 匯率',currentFx()>1?currentFx():'','number','step="any" min="0.000001" required')}`;
     $('quoteDialog').showModal();
   }
 
