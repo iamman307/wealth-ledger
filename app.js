@@ -1,6 +1,6 @@
 (() => {
   'use strict';
-  const APP_VERSION = '1.0.7';
+  const APP_VERSION = '1.0.8';
   const STORAGE_KEY = 'wealth-ledger-db-v1';
   const MARKET_KEY = 'wealth-ledger-finnhub-key-v1';
   const state = { view: 'overview', holdingFilter: 'all', transactionFilter: 'all', performanceMode: 'returns', performanceScope: 'all', demo: false };
@@ -267,14 +267,26 @@
   }
 
   function renderPerformance(p){
-    const stockTotal=p.stockRealized+p.stockUnrealized;
-    $('returnMetrics').innerHTML=[metric('股票總損益',`${signedMoney(stockTotal)} 元`,'已實現＋未實現',tone(stockTotal)),metric('幣安總損益',`${signedMoney(p.cryptoTotal)} 元`,'總資產－累計投入',tone(p.cryptoTotal)),metric('信貸成本',`-${money(p.financing)} 元`,'手續費＋利息',p.financing?'negative':''),metric('淨成果',`${signedMoney(p.netPnl)} 元`,'扣除融資成本',tone(p.netPnl))].join('');
+    const stockTotal=finite(p.stockUnrealized)?p.stockRealized+p.stockUnrealized:NaN;
+    const realizedTotal=p.stockRealized+p.cryptoRealized;
+    const unrealizedTotal=finite(p.stockUnrealized)&&finite(p.cryptoImplied)?p.stockUnrealized+p.cryptoImplied:NaN;
+    $('returnMetrics').innerHTML=[
+      metric('已實現損益',`${signedMoney(realizedTotal)} 元`,`股票 ${signedMoney(p.stockRealized)}・幣安策略 ${signedMoney(p.cryptoRealized)}`,tone(realizedTotal)),
+      metric('未實現／未拆分',`${signedMoney(unrealizedTotal)} 元`,'股票浮動＋幣安未拆分',tone(unrealizedTotal)),
+      metric('全部投資損益',`${signedMoney(p.grossPnl)} 元`,'已實現＋未實現（含幣安）',tone(p.grossPnl)),
+      metric('扣融資後淨成果',`${signedMoney(p.netPnl)} 元`,`融資成本 -${money(p.financing)}`,tone(p.netPnl))
+    ].join('');
     const bridge=[['股票已實現',p.stockRealized,'var(--positive)'],['股票未實現',p.stockUnrealized,p.stockUnrealized>=0?'var(--positive)':'var(--negative)'],['幣安總損益',p.cryptoTotal,p.cryptoTotal>=0?'var(--crypto)':'var(--negative)'],['融資成本',-p.financing,'var(--negative)']];
     const max=Math.max(1,...bridge.map(x=>Math.abs(number(x[1]))));
     $('pnlBridge').innerHTML=bridge.map(x=>`<div class="bridge-row"><span>${x[0]}</span><div class="bridge-track"><i style="width:${Math.max(3,Math.abs(number(x[1]))/max*100)}%;background:${x[2]}"></i></div><strong class="${tone(x[1])}">${signedMoney(x[1])}</strong></div>`).join('');
     const long=p.funds.buckets['長期'],swing=p.funds.buckets['波段'];
-    const accountRows=[['長期股票',long.netGainKnown,'var(--long)'],['波段股票',swing.netGainKnown,'var(--swing)'],['幣安',p.cryptoTotal,'var(--crypto)']];
-    $('accountPerformance').innerHTML=accountRows.map(x=>`<div class="performance-row"><i style="background:${x[2]}"></i><span><strong>${x[0]}</strong><small>目前累計成果</small></span><strong class="${tone(x[1])}">${signedMoney(x[1])}</strong></div>`).join('');
+    const accountUnrealized=bucket=>bucket.missingQuotes?NaN:bucket.marketValue-bucket.cost;
+    const accountRows=[
+      {name:'長期股票',realized:long.realized,unrealized:accountUnrealized(long),total:long.netGainKnown,color:'var(--long)',unrealizedLabel:'未實現'},
+      {name:'波段股票',realized:swing.realized,unrealized:accountUnrealized(swing),total:swing.netGainKnown,color:'var(--swing)',unrealizedLabel:'未實現'},
+      {name:'幣安',realized:p.cryptoRealized,unrealized:p.cryptoImplied,total:p.cryptoTotal,color:'var(--crypto)',unrealizedLabel:'未實現／未拆分'}
+    ];
+    $('accountPerformance').innerHTML=accountRows.map(row=>`<div class="performance-row"><i style="background:${row.color}"></i><div class="performance-account"><strong>${escapeHtml(row.name)}</strong><div class="performance-breakdown"><span>已實現 <b class="${tone(row.realized)}">${signedMoney(row.realized)}</b></span><span>${escapeHtml(row.unrealizedLabel)} <b class="${tone(row.unrealized)}">${signedMoney(row.unrealized)}</b></span></div></div><div class="performance-total"><small>總損益</small><strong class="${tone(row.total)}">${signedMoney(row.total)}</strong></div></div>`).join('');
     const groups=performanceTrades(p);const selected=groups[state.performanceScope];const stats=qualityStats(selected);
     $('qualityMetrics').innerHTML=[metric('完整交易',`${stats.count} 筆`,`${stats.ratedCount}筆有報酬率`),metric('勝率',percent(stats.winRate,1),'已平倉樣本',tone(stats.winRate-50)),metric('平均獲利',percent(stats.avgWin),'獲利交易'),metric('平均虧損',finite(stats.avgLoss)?`-${Number(stats.avgLoss).toFixed(2)}%`:'—','虧損交易','negative'),metric('Payoff',finite(stats.payoff)?`${stats.payoff.toFixed(2)} : 1`:'—','平均獲利率÷平均虧損率'),metric('Expectancy',percent(stats.expectancy),'每筆期望值',tone(stats.expectancy)),metric('Profit Factor',finite(stats.profitFactor)?stats.profitFactor.toFixed(2):'—','總獲利÷總虧損',tone(stats.profitFactor-1)),metric('最大回撤',`${signedMoney(stats.maxDrawdown)} 元`,`${stats.maxWinStreak}連勝・${stats.maxLossStreak}連敗`,'negative')].join('');
     const rows=[...selected].sort((a,b)=>dateValue(b.close)-dateValue(a.close));
