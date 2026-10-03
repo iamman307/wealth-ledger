@@ -12,6 +12,8 @@ Wealth Ledger 是一個本機優先（local-first）的投資總帳 PWA，介面
 - 相容 Stock Ledger 完整 JSON，支援合併匯入與匯出備份
 - 可安裝到 Android／iPhone 主畫面，離線開啟
 - 可選擇填入個人 Finnhub API 金鑰，自動補抓美股持倉現價；報價未成功時保留舊價與時間
+- 同一組 Finnhub 金鑰可更新 Binance BTCUSDT 現價；只重估 BTC 持倉，不改動幣安總資產快照或入金
+- 對帳頁可記錄新增股票投入，一次同步長期／波段配置本金與證券戶銀行快照，且不列為損益
 
 ## 隱私
 
