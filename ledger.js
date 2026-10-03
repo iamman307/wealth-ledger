@@ -1,12 +1,12 @@
 /* Wealth Ledger calculation engine. Private account policy lives in imported data. */
 (function(root){
   'use strict';
-  const VERSION='6.12.0';
+  const VERSION='6.13.0';
   const LONG_TERM_TICKERS=Object.freeze([]);
   const DEFAULT_FUND_PLAN=Object.freeze({longTerm:0,swing:0,loan:0,reserve:0,locked:false});
   const CAPITAL_SOURCE_KEYS=Object.freeze(['loan','self','family']);
   const DEFAULT_CAPITAL_TRACKING=Object.freeze({enabled:false,scope:'investment-only',resetDate:'',openingLoan:0,openingSelf:0,openingFamily:0,loanGross:0,loanFee:0,principalRepaid:0,interestPaid:0,excludedDailyTwd:0,cashAdjustmentTwd:0,otherPnlTwd:0,pnlBaselineTwd:0,events:[]});
-  const DEFAULT_SECURITIES_CASH=Object.freeze({enabled:false,asOf:'',accountBalanceTwd:0,reservedTwd:0,externalInvestmentTransfersTwd:0,externalTransfers:[],pendingSettlements:[]});
+  const DEFAULT_SECURITIES_CASH=Object.freeze({enabled:false,asOf:'',accountBalanceTwd:0,reservedTwd:0,externalInvestmentTransfersTwd:0,externalTransfers:[],investmentContributions:[],pendingSettlements:[]});
   const clone = x => JSON.parse(JSON.stringify(x));
   const finite = x => typeof x === 'number' && Number.isFinite(x);
   const has = x => x !== null && x !== undefined;
@@ -67,6 +67,17 @@
       if(!finite(amountTwd)||amountTwd<=0)throw Error(label+' 金額錯誤');
       return {id,date,amountTwd,destination,note:String(raw.note||'')};
     });
+    const contributionIds=new Set();
+    const investmentContributions=(Array.isArray(s.investmentContributions)?s.investmentContributions:[]).map((raw,index)=>{
+      const label='股票新增投入 '+(index+1);
+      if(!raw||typeof raw!=='object'||Array.isArray(raw))throw Error(label+' 格式錯誤');
+      const id=String(raw.id||''),date=String(raw.date||''),amountTwd=Number(raw.amountTwd),account=String(raw.account||'');
+      if(!id||contributionIds.has(id))throw Error(label+' ID 缺少或重複');contributionIds.add(id);
+      if(!date||!Number.isFinite(Date.parse(date)))throw Error(label+' 日期錯誤');
+      if(!finite(amountTwd)||amountTwd<=0)throw Error(label+' 金額錯誤');
+      if(!['長期','波段'].includes(account))throw Error(label+' 帳戶錯誤');
+      return {id,date,amountTwd,account,note:String(raw.note||'')};
+    });
     const ids=new Set();
     const pendingSettlements=(Array.isArray(s.pendingSettlements)?s.pendingSettlements:[]).map((raw,index)=>{
       const label='待交割 '+(index+1);
@@ -79,7 +90,7 @@
       if(!finite(fx)||fx<=0)throw Error(label+' 匯率錯誤');
       return {id,date,currency,amount,fx,ticker:String(raw.ticker||''),side:String(raw.side||''),note:String(raw.note||'')};
     });
-    return {enabled,asOf,accountBalanceTwd,reservedTwd,externalInvestmentTransfersTwd,externalTransfers,pendingSettlements};
+    return {enabled,asOf,accountBalanceTwd,reservedTwd,externalInvestmentTransfersTwd,externalTransfers,investmentContributions,pendingSettlements};
   }
   function recordExternalInvestmentTransfer(data,input){
     const d=applyPolicy(data),raw=input&&typeof input==='object'&&!Array.isArray(input)?input:{};
@@ -97,6 +108,26 @@
     cash.externalInvestmentTransfersTwd=Math.max(cash.externalInvestmentTransfersTwd,externalFundingTwd(d))+amountTwd;
     cash.externalTransfers.push({id,date,amountTwd,destination:String(raw.destination||'外部投資'),note:String(raw.note||'')});
     d.meta.securitiesCash=cash;
+    return applyPolicy(d);
+  }
+  function recordSecuritiesContribution(data,input){
+    const d=applyPolicy(data),raw=input&&typeof input==='object'&&!Array.isArray(input)?input:{};
+    const cash=normalizeSecuritiesCash(d.meta.securitiesCash),plan=normalizeFundPlan(d.meta.fundPlan);
+    if(!cash.enabled||!cash.asOf)throw Error('尚未建立證券戶銀行快照');
+    const id=String(raw.id||''),date=String(raw.date||''),amountTwd=Number(raw.amountTwd),account=String(raw.account||''),accountBalanceTwd=Number(raw.accountBalanceTwd),reservedTwd=Number(raw.reservedTwd);
+    if(!id||cash.investmentContributions.some(event=>event.id===id))throw Error('股票新增投入 ID 缺少或重複');
+    if(!date||!Number.isFinite(Date.parse(date)))throw Error('股票新增投入日期錯誤');
+    if(!finite(amountTwd)||amountTwd<=0)throw Error('新增投入金額必須大於 0');
+    if(!['長期','波段'].includes(account))throw Error('請選擇長期或波段帳戶');
+    if(!finite(accountBalanceTwd)||accountBalanceTwd<0)throw Error('證券戶帳面餘額格式錯誤');
+    if(!finite(reservedTwd)||reservedTwd<0||reservedTwd>accountBalanceTwd)throw Error('圈存金額不可大於帳面餘額');
+    cash.accountBalanceTwd=accountBalanceTwd;
+    cash.reservedTwd=reservedTwd;
+    cash.asOf=date;
+    cash.investmentContributions.push({id,date,amountTwd,account,note:String(raw.note||'')});
+    if(account==='長期')plan.longTerm+=amountTwd;else plan.swing+=amountTwd;
+    d.meta.securitiesCash=cash;
+    d.meta.fundPlan=plan;
     return applyPolicy(d);
   }
   function parseCapitalSetup(setup){
@@ -413,7 +444,7 @@
     const aw=avg(ratedWins),al=Math.abs(avg(ratedLosses));
     return {count:completed.length,returnCount:rated.length,winRate:completed.length?wins.length/completed.length*100:NaN,avgWin:aw,avgLoss:al,payoff:al>0?aw/al:NaN,expectancy:avg(rated)};
   }
-  const api={VERSION,LONG_TERM_TICKERS,DEFAULT_FUND_PLAN,DEFAULT_CAPITAL_TRACKING,DEFAULT_SECURITIES_CASH,CAPITAL_SOURCE_KEYS,validate,compute,merge,stats,moneyStats,sameManual,manualKey,classifyAccount,normalizeFundPlan,normalizeCapitalTracking,normalizeSecuritiesCash,parseCapitalSetup,applyPolicy,fundSummary,securitiesCashSummary,externalFundingTwd,capitalSummary,transactionValueTwd,pendingSettlementFromTransaction,recordExternalInvestmentTransfer};
+  const api={VERSION,LONG_TERM_TICKERS,DEFAULT_FUND_PLAN,DEFAULT_CAPITAL_TRACKING,DEFAULT_SECURITIES_CASH,CAPITAL_SOURCE_KEYS,validate,compute,merge,stats,moneyStats,sameManual,manualKey,classifyAccount,normalizeFundPlan,normalizeCapitalTracking,normalizeSecuritiesCash,parseCapitalSetup,applyPolicy,fundSummary,securitiesCashSummary,externalFundingTwd,capitalSummary,transactionValueTwd,pendingSettlementFromTransaction,recordExternalInvestmentTransfer,recordSecuritiesContribution};
   if(typeof module!=='undefined'&&module.exports)module.exports=api;
   root.Ledger=api;
 })(typeof globalThis!=='undefined'?globalThis:this);
