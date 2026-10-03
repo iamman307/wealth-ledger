@@ -1,6 +1,6 @@
 (() => {
   'use strict';
-  const APP_VERSION = '1.0.4';
+  const APP_VERSION = '1.0.5';
   const STORAGE_KEY = 'wealth-ledger-db-v1';
   const state = { view: 'overview', holdingFilter: 'all', transactionFilter: 'all', performanceMode: 'returns', performanceScope: 'all', demo: false };
   let installPrompt = null;
@@ -132,17 +132,16 @@
     const stockRealized=computed.realized.reduce((sum,t)=>sum+t.pnlTwd,0);
     const crypto=cryptoSnapshot();
     const cryptoFunding=funds.externalFundingTwd;
-    const cryptoTotal=cryptoFunding>0?crypto.value-cryptoFunding:NaN;
+    const cryptoTotal=crypto.source!=='none'&&cryptoFunding>0?crypto.value-cryptoFunding:NaN;
     const cryptoTrades=manualTrades();
     const cryptoRealized=cryptoTrades.reduce((sum,t)=>sum+t.realizedTwd,0);
     const cryptoImplied=finite(cryptoTotal)?cryptoTotal-cryptoRealized:NaN;
     const financing=number(db.meta?.capitalTracking?.loanFee)+number(db.meta?.capitalTracking?.interestPaid);
     const grossPnl=finite(stockUnrealized)&&finite(cryptoTotal)?stockRealized+stockUnrealized+cryptoTotal:NaN;
     const netPnl=finite(grossPnl)?grossPnl-financing:NaN;
-    const stockCash=securities.configured?securities.postSettlementTwd:funds.investmentAvailable;
-    const totalAssets=missingQuotes?NaN:stockMarket+stockCash+crypto.value;
-    const inferredCapital=finite(grossPnl)?totalAssets-grossPnl:funds.investmentPlan;
-    return {computed,funds,securities,positionRows,missingQuotes,stockMarket,stockCost,stockUnrealized,stockRealized,crypto,cryptoFunding,cryptoTotal,cryptoRealized,cryptoImplied,cryptoTrades,financing,grossPnl,netPnl,stockCash,totalAssets,inferredCapital};
+    const stockCash=securities.configured?securities.postSettlementTwd:NaN;
+    const totalAssets=missingQuotes||!finite(stockCash)||crypto.source==='none'?NaN:stockMarket+stockCash+crypto.value;
+    return {computed,funds,securities,positionRows,missingQuotes,stockMarket,stockCost,stockUnrealized,stockRealized,crypto,cryptoFunding,cryptoTotal,cryptoRealized,cryptoImplied,cryptoTrades,financing,grossPnl,netPnl,stockCash,totalAssets};
   }
 
   function showView(view){
@@ -173,6 +172,7 @@
   function renderNotice(p){
     const messages=[];
     if(p.missingQuotes)messages.push(`${p.missingQuotes}個股票持倉缺少行情，總損益暫不完整`);
+    if(!p.securities.configured)messages.push('尚未設定證券戶現金快照，總資產暫不完整');
     if(p.crypto.source==='none')messages.push('尚未設定幣安總資產');
     if(p.crypto.asOf && Date.now()-dateValue(p.crypto.asOf)>7*864e5)messages.push('幣安快照已超過7天');
     if(p.securities.configured && Date.now()-dateValue(p.securities.asOf)>7*864e5)messages.push('證券戶快照已超過7天');
@@ -186,25 +186,26 @@
   function renderOverview(p){
     $('totalAssets').textContent=`NT$${money(p.totalAssets)}`;
     $('assetFreshness').textContent=`股票行情與現金快照｜USD/TWD ${money(currentFx(),3)}`;
-    $('investedCapital').textContent=`NT$${money(p.inferredCapital)}`;
+    $('investedCapital').textContent=`NT$${money(p.funds.investmentPlan)}`;
     $('realizedPnl').textContent=`${signedMoney(p.stockRealized+p.cryptoRealized)} 元`; $('realizedPnl').className=tone(p.stockRealized+p.cryptoRealized);
     const implied=finite(p.stockUnrealized)&&finite(p.cryptoImplied)?p.stockUnrealized+p.cryptoImplied:NaN;
     $('unrealizedPnl').textContent=`${signedMoney(implied)} 元`; $('unrealizedPnl').className=tone(implied);
     $('financingCost').textContent=`-${money(p.financing)} 元`; $('financingCost').className=p.financing?'negative':'';
     $('netResult').textContent=`${signedMoney(p.netPnl)} 元`; $('netResult').className=tone(p.netPnl);
-    const roi=finite(p.netPnl)&&p.inferredCapital?p.netPnl/p.inferredCapital*100:NaN;
+    const roi=finite(p.netPnl)&&p.funds.investmentPlan?p.netPnl/p.funds.investmentPlan*100:NaN;
     $('totalReturnBadge').textContent=finite(roi)?percent(roi):'資料不完整';$('totalReturnBadge').className=`return-badge ${finite(roi)&&roi<0?'negative':''}`;
 
     const long=p.funds.buckets['長期'],swing=p.funds.buckets['波段'];
     const accounts=[
-      {name:'長期投資',sub:long.tickers.join('・')||'尚無持倉',color:'var(--long)',icon:'briefcase',value:long.equityKnown,pnl:long.netGainKnown,cost:long.cost,available:long.available,allocation:long.allocation},
-      {name:'波段股票',sub:'完整持倉週期',color:'var(--swing)',icon:'chart',value:p.funds.swingAvailableTwd+swing.marketValue,pnl:swing.netGainKnown,cost:swing.cost,available:p.funds.swingAvailableTwd,allocation:p.funds.swingStockAllocationTwd},
-      {name:'幣安',sub:'現貨・合約・網格',color:'var(--crypto)',icon:'bitcoin',value:p.crypto.value,pnl:p.cryptoTotal,cost:p.cryptoFunding,available:p.crypto.value,allocation:p.cryptoFunding}
+      {name:'長期持倉',sub:long.tickers.join('・')||'尚無持倉',color:'var(--long)',icon:'briefcase',value:long.missingQuotes?NaN:long.marketValue,pnl:long.netGainKnown,cost:long.cost,available:long.available,allocation:long.allocation},
+      {name:'波段持倉',sub:swing.tickers.join('・')||'尚無持倉',color:'var(--swing)',icon:'chart',value:swing.missingQuotes?NaN:swing.marketValue,pnl:swing.netGainKnown,cost:swing.cost,available:p.funds.swingAvailableTwd,allocation:p.funds.swingStockAllocationTwd},
+      {name:'證券現金',sub:p.securities.configured?'交割後預估':'尚未設定快照',color:'var(--cash)',icon:'wallet',value:p.stockCash,pnl:NaN,cost:NaN,available:p.securities.availableTwd,allocation:0,kind:'cash'},
+      {name:'幣安',sub:'現貨・合約・網格',color:'var(--crypto)',icon:'bitcoin',value:p.crypto.source==='none'?NaN:p.crypto.value,pnl:p.cryptoTotal,cost:p.cryptoFunding,available:p.crypto.value,allocation:p.cryptoFunding}
     ];
     $('accountCards').innerHTML=accounts.map(a=>{
       const ret=finite(a.pnl)&&a.allocation?a.pnl/a.allocation*100:NaN;
       const used=a.allocation?Math.max(0,Math.min(100,a.cost/a.allocation*100)):0;
-      return `<article class="account-card" style="--account-color:${a.color}"><div class="account-top"><div class="account-name"><div class="account-icon">${icons[a.icon]}</div><span><strong>${a.name}</strong><small>${a.sub}</small></span></div><span class="account-return ${tone(a.pnl)}">${percent(ret)}</span></div><div class="account-value">NT$${money(a.value)} <small>現值</small></div><div class="account-meta"><div><span>成本／投入</span><strong>${money(a.cost)}</strong></div><div><span>${a.name==='幣安'?'總損益':'可動用'}</span><strong class="${a.name==='幣安'?tone(a.pnl):''}">${a.name==='幣安'?signedMoney(a.pnl):money(a.available)}</strong></div></div><div class="account-bar"><i style="width:${used}%"></i></div></article>`;
+      return `<article class="account-card" style="--account-color:${a.color}"><div class="account-top"><div class="account-name"><div class="account-icon">${icons[a.icon]}</div><span><strong>${a.name}</strong><small>${escapeHtml(a.sub)}</small></span></div><span class="account-return ${tone(a.pnl)}">${a.kind==='cash'?'快照':percent(ret)}</span></div><div class="account-value">NT$${money(a.value)} <small>${a.kind==='cash'?'現金':'現值'}</small></div><div class="account-meta"><div><span>${a.kind==='cash'?'銀行帳面餘額':'成本／投入'}</span><strong>${money(a.kind==='cash'?p.securities.accountBalanceTwd:a.cost)}</strong></div><div><span>${a.kind==='cash'?'目前可用':a.name==='幣安'?'總損益':'配置可動用'}</span><strong class="${a.name==='幣安'?tone(a.pnl):''}">${a.name==='幣安'?signedMoney(a.pnl):money(a.available)}</strong></div></div><div class="account-bar"><i style="width:${used}%"></i></div></article>`;
     }).join('');
 
     const contrib=p.positionRows.filter(x=>finite(x.unrealizedTwd)).map(x=>({ticker:x.ticker,value:x.unrealizedTwd}));
