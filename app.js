@@ -1,6 +1,6 @@
 (() => {
   'use strict';
-  const APP_VERSION = '1.0.5';
+  const APP_VERSION = '1.0.6';
   const STORAGE_KEY = 'wealth-ledger-db-v1';
   const state = { view: 'overview', holdingFilter: 'all', transactionFilter: 'all', performanceMode: 'returns', performanceScope: 'all', demo: false };
   let installPrompt = null;
@@ -171,7 +171,9 @@
 
   function renderNotice(p){
     const messages=[];
-    if(p.missingQuotes)messages.push(`${p.missingQuotes}個股票持倉缺少行情，總損益暫不完整`);
+    if(p.missingQuotes)messages.push(`缺少行情：${p.positionRows.filter(row=>!finite(row.marketValueTwd)).map(row=>row.ticker).join('、')}，總損益暫不完整`);
+    if(p.computed.issues.length)messages.push(`交易待補：${p.computed.issues.join('；')}`);
+    if(currentFx()<=1)messages.push('尚未設定有效的 USD/TWD 參考匯率，跨幣別損益暫不完整');
     if(!p.securities.configured)messages.push('尚未設定證券戶現金快照，總資產暫不完整');
     if(p.crypto.source==='none')messages.push('尚未設定幣安總資產');
     if(p.crypto.asOf && Date.now()-dateValue(p.crypto.asOf)>7*864e5)messages.push('幣安快照已超過7天');
@@ -185,7 +187,7 @@
 
   function renderOverview(p){
     $('totalAssets').textContent=`NT$${money(p.totalAssets)}`;
-    $('assetFreshness').textContent=`股票行情與現金快照｜USD/TWD ${money(currentFx(),3)}`;
+    $('assetFreshness').textContent=`股票行情與現金快照｜USD/TWD ${currentFx()>1?money(currentFx(),3):'未設定'}`;
     $('investedCapital').textContent=`NT$${money(p.funds.investmentPlan)}`;
     $('realizedPnl').textContent=`${signedMoney(p.stockRealized+p.cryptoRealized)} 元`; $('realizedPnl').className=tone(p.stockRealized+p.cryptoRealized);
     const implied=finite(p.stockUnrealized)&&finite(p.cryptoImplied)?p.stockUnrealized+p.cryptoImplied:NaN;

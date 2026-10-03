@@ -362,7 +362,25 @@
         d.meta.securitiesCash=incomingCash;report.securitiesCashUpdated=1;report.changes.push('證券戶現金快照已更新至 '+incomingCash.asOf);
       }else report.securitiesCashSkipped=1;
     }
-    // Import files cannot silently change live cash balances or quote snapshots.
+    // An add-on transaction file may have been imported before a full backup.
+    // Fill missing reference data without replacing snapshots already entered here.
+    for(const [ticker,quote] of Object.entries(src.quotes)){
+      if(!d.quotes[ticker]){d.quotes[ticker]=quote;report.changes.push(ticker+' 行情已由備份補回');}
+    }
+    const planTotal=plan=>Number(plan?.longTerm||0)+Number(plan?.swing||0)+Number(plan?.loan||0)+Number(plan?.reserve||0);
+    if(planTotal(d.meta.fundPlan)===0&&planTotal(src.meta.fundPlan)>0){
+      d.meta.fundPlan=src.meta.fundPlan;report.changes.push('資金配置已由完整備份補回');
+    }
+    if(!(Number(d.meta.currentUsdTwd)>1)&&Number(src.meta.currentUsdTwd)>1){
+      d.meta.currentUsdTwd=src.meta.currentUsdTwd;report.changes.push('參考匯率已由完整備份補回');
+    }
+    if(!d.meta.capitalTracking?.enabled&&src.meta.capitalTracking?.enabled){
+      d.meta.capitalTracking=src.meta.capitalTracking;report.changes.push('資金來源設定已由完整備份補回');
+    }
+    if(!(Number(d.meta.cryptoSnapshot?.totalValueTwd)>=0)&&Number(src.meta.cryptoSnapshot?.totalValueTwd)>=0&&src.meta.cryptoSnapshot?.totalValueTwd!=null){
+      d.meta.cryptoSnapshot=src.meta.cryptoSnapshot;report.changes.push('幣安總資產快照已由完整備份補回');
+    }
+    // Keep existing cash and quote snapshots; only absent reference data is filled.
     const checked=validate(d),result=compute(checked);
     if(result.issues.length)throw Error(result.issues.join('\n'));
     return {db:checked,report};
