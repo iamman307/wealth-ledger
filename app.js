@@ -1,6 +1,6 @@
 (() => {
   'use strict';
-  const APP_VERSION = '1.0.8';
+  const APP_VERSION = '1.0.9';
   const STORAGE_KEY = 'wealth-ledger-db-v1';
   const MARKET_KEY = 'wealth-ledger-finnhub-key-v1';
   const state = { view: 'overview', holdingFilter: 'all', transactionFilter: 'all', performanceMode: 'returns', performanceScope: 'all', demo: false };
@@ -185,6 +185,8 @@
     if(!p.securities.configured)messages.push('尚未設定證券戶現金快照，總資產暫不完整');
     if(p.crypto.source==='none')messages.push('尚未設定幣安總資產');
     if(p.crypto.asOf && Date.now()-dateValue(p.crypto.asOf)>7*864e5)messages.push('幣安快照已超過7天');
+    const btc=(db.externalHoldings||[]).find(row=>row.ticker==='BTC');
+    if(btc?.asOf&&Date.now()-dateValue(btc.asOf)>864e5)messages.push('BTC 行情已超過24小時，可到持倉頁自動更新');
     if(p.securities.configured && Date.now()-dateValue(p.securities.asOf)>7*864e5)messages.push('證券戶快照已超過7天');
     if(messages.length)showNotice(messages.join('・')); else $('notice').hidden=true;
   }
@@ -318,7 +320,7 @@
     $('allocationForm').innerHTML=`${inputField('longTerm','長期配置（TWD）',plan.longTerm)}${inputField('swing','波段配置（TWD）',plan.swing)}${inputField('loan','信貸扣款保留（TWD）',plan.loan)}${inputField('reserve','緊急預備金（TWD）',plan.reserve)}<div class="form-actions"><button class="button button-primary" type="submit">儲存配置</button></div>`;
     $('capitalForm').innerHTML=`${inputField('resetDate','追蹤起始日',cap.resetDate,'date')}${inputField('loanGross','信貸原始本金',cap.loanGross)}${inputField('loanFee','開辦／手續費',cap.loanFee)}${inputField('principalRepaid','已還本金',cap.principalRepaid)}${inputField('interestPaid','累計利息',cap.interestPaid)}${inputField('cashAdjustmentTwd','現金校正',cap.cashAdjustmentTwd)}<div class="form-actions"><button class="button button-primary" type="submit">儲存資金設定</button></div>`;
     $('allocationForm').onsubmit=saveAllocation;$('capitalForm').onsubmit=saveCapital;
-    $('marketKeyStatus').textContent=localStorage.getItem(MARKET_KEY)?'這台裝置已設定；金鑰不包含在備份內。':'尚未設定。設定一次後可自動更新美股持倉行情。';
+    $('marketKeyStatus').textContent=localStorage.getItem(MARKET_KEY)?'這台裝置已設定；可自動更新美股與 BTC，金鑰不包含在備份內。':'尚未設定。設定一次後可自動更新美股與 BTC 行情。';
   }
 
   function saveMarketKey(event){
@@ -341,21 +343,33 @@
     const stocks=[...new Set(positions.filter(p=>p.currency==='USD'&&!p.ticker.startsWith('DEMO-')).map(p=>p.ticker))];
     const now=Date.now();
     const wanted=stocks.filter(ticker=>force||!db.quotes[ticker]||now-Date.parse(db.quotes[ticker].fetchedAt||db.quotes[ticker].updated||'')>6*36e5);
-    if(!wanted.length){if(force)toast('沒有需要更新的美股持倉');return;}
+    const btcIndex=(db.externalHoldings||[]).findIndex(row=>row.ticker==='BTC'&&row.currency==='USDT');
+    const btc=btcIndex>=0?db.externalHoldings[btcIndex]:null;
+    const btcQuoteAt=btc?Date.parse(btc.quoteFetchedAt||btc.asOf||''):NaN;
+    const btcStale=btc&&(force||!Number.isFinite(btcQuoteAt)||now-btcQuoteAt>15*6e4);
+    const requests=[...wanted.map(ticker=>({kind:'stock',label:ticker,symbol:ticker,ticker})),...(btcStale?[{kind:'btc',label:'BTC',symbol:'BINANCE:BTCUSDT'}]:[])];
+    if(!requests.length){if(force)toast('沒有需要更新的股票或 BTC 行情');return;}
     const button=$('autoQuoteButton');quoteRefreshInFlight=true;button.disabled=true;button.textContent='抓取中…';
     try{
-      const fetched=await Promise.allSettled(wanted.map(ticker=>MarketQuotes.fetchQuote(ticker,key)));
+      const fetched=await Promise.allSettled(requests.map(request=>MarketQuotes.fetchQuote(request.symbol,key)));
       if(localStorage.getItem(MARKET_KEY)!==key)return;
       const next=clone(db),errors=[];let count=0;
       fetched.forEach((result,index)=>{
-        const ticker=wanted[index];
-        if(result.status==='rejected'){errors.push(`${ticker}：${result.reason?.message||'連線失敗'}`);return;}
-        const current=next.quotes[ticker];
+        const request=requests[index];
+        if(result.status==='rejected'){errors.push(`${request.label}：${result.reason?.message||'連線失敗'}`);return;}
+        if(request.kind==='btc'){
+          const idx=next.externalHoldings.findIndex(row=>row.ticker==='BTC'&&row.currency==='USDT');
+          if(idx<0)return;
+          next.externalHoldings[idx]=MarketQuotes.priceExternalHolding(next.externalHoldings[idx],result.value,currentFx(next));
+          count++;
+          return;
+        }
+        const current=next.quotes[request.ticker];
         if(current&&Date.parse(current.fetchedAt||current.updated||'')>now)return;
-        next.quotes[ticker]={...result.value,fx:currentFx(next),currency:'USD'};
+        next.quotes[request.ticker]={...result.value,fx:currentFx(next),currency:'USD'};
         count++;
       });
-      if(count){db=Ledger.applyPolicy(next);saveDb(`已更新 ${count} 檔美股行情`);}
+      if(count){db=Ledger.applyPolicy(next);saveDb(`已更新 ${count} 項股票／BTC 行情`);}
       if(errors.length)showNotice(`未更新：${errors.join('；')}。舊行情仍保留，可稍後重試或手動輸入。`,'error');
       else if(!count&&force)toast('行情沒有更新');
     }catch(error){showNotice(`行情儲存失敗：${error.message}`,'error');}
@@ -400,6 +414,18 @@
     event.preventDefault();const f=new FormData(event.currentTarget),next=clone(db),old=Ledger.normalizeSecuritiesCash(next.meta.securitiesCash);
     next.meta.securitiesCash={...old,enabled:true,asOf:String(f.get('bankDate')),accountBalanceTwd:number(f.get('bankBalance')),reservedTwd:number(f.get('bankReserved'))};
     try{db=Ledger.applyPolicy(next);$('bankDialog').close();saveDb('銀行快照已更新')}catch(error){showNotice(error.message,'error')}
+  }
+
+  function openStockFundingDialog(){
+    const s=Ledger.normalizeSecuritiesCash(db.meta?.securitiesCash);
+    if(!s.enabled||!s.asOf){showNotice('請先更新證券交割戶快照，再記錄新增股票投入','error');showView('reconcile');return;}
+    $('stockFundingFields').innerHTML=`${inputField('stockFundingDate','轉入時間',isoLocal(),'datetime-local','required')}${inputField('stockFundingAmount','新增投入本金（TWD）','', 'number','step="1" min="1" required')}<div class="field"><label for="stockFundingAccount">投入帳戶</label><select id="stockFundingAccount" name="stockFundingAccount"><option value="波段">波段</option><option value="長期">長期</option></select></div>${inputField('stockFundingBalance','轉入後證券戶餘額',s.accountBalanceTwd,'number','step="1" min="0" required')}${inputField('stockFundingReserved','轉入後圈存',s.reservedTwd,'number','step="1" min="0"')}<div class="field full"><label for="stockFundingNote">備註</label><input id="stockFundingNote" name="stockFundingNote" type="text" placeholder="例如：薪資新增投入"></div>`;
+    $('stockFundingDialog').showModal();
+  }
+
+  function saveStockFunding(event){
+    event.preventDefault();const f=new FormData(event.currentTarget);
+    try{db=Ledger.recordSecuritiesContribution(db,{id:crypto.randomUUID(),date:String(f.get('stockFundingDate')),amountTwd:number(f.get('stockFundingAmount')),account:String(f.get('stockFundingAccount')),accountBalanceTwd:number(f.get('stockFundingBalance')),reservedTwd:number(f.get('stockFundingReserved')),note:String(f.get('stockFundingNote')||'')});$('stockFundingDialog').close();saveDb('新增股票投入已記錄，配置本金與銀行快照同步更新')}catch(error){showNotice(error.message,'error')}
   }
 
   function openCryptoDialog(){
@@ -482,6 +508,7 @@
     all('[data-close]').forEach(button=>button.onclick=()=>$(button.dataset.close).close());
     $('quickAddButton').onclick=openTradeDialog;$('tradeForm').onsubmit=saveTrade;
     $('editBankButton').onclick=openBankDialog;$('bankForm').onsubmit=saveBank;
+    $('stockFundingButton').onclick=openStockFundingDialog;$('stockFundingForm').onsubmit=saveStockFunding;
     $('editCryptoButton').onclick=openCryptoDialog;$('cryptoForm').onsubmit=saveCrypto;
     $('cryptoTradeButton').onclick=openCryptoTradeDialog;$('cryptoTradeForm').onsubmit=saveCryptoTrade;
     $('quoteButton').onclick=openQuoteDialog;$('quoteForm').onsubmit=saveQuote;
