@@ -1,0 +1,195 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#071019">
+  <meta name="description" content="私人、本機優先的投資資產與交易績效帳本">
+  <title>Wealth Ledger</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="assets/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="assets/icon-192.png">
+  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="enhancements.css?v=1.0.3">
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar" aria-label="主要導覽">
+      <div class="brand">
+        <div class="brand-mark" aria-hidden="true">W</div>
+        <div><strong>Wealth Ledger</strong><span>私人投資總帳</span></div>
+      </div>
+      <nav class="nav-list">
+        <button class="nav-item active" data-view="overview"><span data-icon="grid"></span>總覽</button>
+        <button class="nav-item" data-view="holdings"><span data-icon="briefcase"></span>持倉</button>
+        <button class="nav-item" data-view="transactions"><span data-icon="repeat"></span>交易</button>
+        <button class="nav-item" data-view="performance"><span data-icon="chart"></span>績效</button>
+        <button class="nav-item" data-view="reconcile"><span data-icon="scale"></span>對帳</button>
+        <button class="nav-item" data-view="settings"><span data-icon="settings"></span>設定</button>
+      </nav>
+      <div class="sidebar-foot">
+        <span class="privacy-dot"></span>
+        <div><strong>本機資料</strong><small>不會上傳到公開GitHub</small></div>
+      </div>
+    </aside>
+
+    <main class="main">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow" id="viewEyebrow">PORTFOLIO</p>
+          <h1 id="viewTitle">投資總覽</h1>
+        </div>
+        <div class="top-actions">
+          <button class="icon-button" id="installButton" hidden aria-label="安裝到手機"><span data-icon="download"></span></button>
+          <button class="button button-soft" id="importButton"><span data-icon="upload"></span>匯入</button>
+          <button class="button button-primary" id="quickAddButton"><span data-icon="plus"></span>新增交易</button>
+        </div>
+      </header>
+
+      <div id="notice" class="notice" hidden></div>
+
+      <section id="overview" class="view active" aria-labelledby="viewTitle">
+        <div id="emptyState" class="empty-state" hidden>
+          <div class="empty-icon"><span data-icon="vault"></span></div>
+          <p class="eyebrow">LOCAL-FIRST</p>
+          <h2>把既有投資帳本帶進來</h2>
+          <p>支援舊版 Stock Ledger JSON。交易、幣安快照與資金配置只會保存在這台裝置。</p>
+          <div class="empty-actions">
+            <button class="button button-primary" id="emptyImportButton"><span data-icon="upload"></span>匯入現有備份</button>
+            <button class="button button-soft" id="demoButton">查看虛構示範</button>
+          </div>
+        </div>
+
+        <div id="overviewContent">
+          <article class="hero-card">
+            <div class="hero-main">
+              <div>
+                <div class="hero-label">目前投資資產</div>
+                <div class="hero-value" id="totalAssets">—</div>
+                <div class="hero-sub" id="assetFreshness">等待資料</div>
+              </div>
+              <div class="return-badge" id="totalReturnBadge">—</div>
+            </div>
+            <div class="hero-line"></div>
+            <div class="hero-breakdown">
+              <div><span>投入本金</span><strong id="investedCapital">—</strong></div>
+              <div><span>已實現</span><strong id="realizedPnl">—</strong></div>
+              <div><span>未實現／推估</span><strong id="unrealizedPnl">—</strong></div>
+              <div><span>融資成本</span><strong id="financingCost">—</strong></div>
+              <div class="net-result"><span>扣除融資後總損益</span><strong id="netResult">—</strong></div>
+            </div>
+          </article>
+
+          <div class="section-heading">
+            <div><p class="eyebrow">ACCOUNTS</p><h2>資金帳戶</h2></div>
+            <span class="section-note">配置、成本與可動用分開看</span>
+          </div>
+          <div class="account-grid" id="accountCards"></div>
+
+          <div class="dashboard-grid">
+            <article class="card pnl-card">
+              <div class="card-heading"><div><p class="eyebrow">CONTRIBUTION</p><h2>損益貢獻</h2></div><button class="text-button" data-go="holdings">查看全部</button></div>
+              <div id="contributionList" class="contribution-list"></div>
+            </article>
+            <article class="card allocation-card">
+              <div class="card-heading"><div><p class="eyebrow">ALLOCATION</p><h2>目前配置</h2></div></div>
+              <div class="allocation-body">
+                <div class="donut" id="allocationDonut"><div><strong id="allocationCenter">—</strong><span>持倉市值</span></div></div>
+                <div class="legend" id="allocationLegend"></div>
+              </div>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section id="holdings" class="view">
+        <div class="toolbar">
+          <div class="segmented" id="holdingFilter">
+            <button class="active" data-filter="all">全部</button><button data-filter="長期">長期</button><button data-filter="波段">波段</button><button data-filter="crypto">幣安</button>
+          </div>
+          <div class="toolbar-actions"><label class="search"><span data-icon="search"></span><input id="holdingSearch" placeholder="搜尋代號"></label><button class="button button-soft" id="quoteButton">更新行情</button></div>
+        </div>
+        <div id="holdingSummary" class="metric-grid"></div>
+        <div class="card table-card"><div class="responsive-table"><table id="holdingsTable"></table></div></div>
+      </section>
+
+      <section id="transactions" class="view">
+        <div class="toolbar">
+          <div class="segmented" id="transactionFilter"><button class="active" data-filter="all">全部</button><button data-filter="長期">長期</button><button data-filter="波段">波段</button><button data-filter="crypto">合約／網格</button></div>
+          <div class="toolbar-actions"><label class="search"><span data-icon="search"></span><input id="transactionSearch" placeholder="搜尋交易"></label><button class="button button-soft" id="cryptoTradeButton">新增幣安策略</button></div>
+        </div>
+        <div class="card table-card"><div class="responsive-table"><table id="transactionsTable"></table></div></div>
+      </section>
+
+      <section id="performance" class="view">
+        <div class="performance-switch">
+          <button class="active" data-performance="returns">資產報酬</button>
+          <button data-performance="quality">交易能力</button>
+        </div>
+        <div id="returnsPanel">
+          <div id="returnMetrics" class="metric-grid"></div>
+          <div class="dashboard-grid">
+            <article class="card"><div class="card-heading"><div><p class="eyebrow">P&amp;L BRIDGE</p><h2>損益組成</h2></div></div><div id="pnlBridge" class="bridge-chart"></div></article>
+            <article class="card"><div class="card-heading"><div><p class="eyebrow">BY ACCOUNT</p><h2>帳戶成果</h2></div></div><div id="accountPerformance" class="account-performance"></div></article>
+          </div>
+        </div>
+        <div id="qualityPanel" hidden>
+          <div class="toolbar compact"><div class="segmented" id="performanceScope"><button class="active" data-scope="all">全部</button><button data-scope="stock">股票</button><button data-scope="crypto">幣安</button></div></div>
+          <div id="qualityMetrics" class="metric-grid"></div>
+          <article class="card"><div class="card-heading"><div><p class="eyebrow">CLOSED TRADES</p><h2>完整交易樣本</h2></div><span class="section-note">持倉歸零才計一筆</span></div><div class="responsive-table"><table id="closedTradesTable"></table></div></article>
+        </div>
+      </section>
+
+      <section id="reconcile" class="view">
+        <div class="reconcile-layout">
+          <article class="card bank-card"><div class="card-heading"><div><p class="eyebrow">SECURITIES CASH</p><h2>證券交割戶</h2></div><span class="status-pill" id="bankAsOf">未設定</span></div><div id="bankMetrics" class="bank-metrics"></div><div id="pendingList" class="pending-list"></div><div class="stack-actions"><button class="button button-soft full" id="editBankButton">更新銀行快照</button><button class="button button-primary full" id="transferButton">記錄轉入幣安</button></div></article>
+          <article class="card"><div class="card-heading"><div><p class="eyebrow">RECONCILIATION</p><h2>帳本與銀行差額</h2></div></div><div id="reconciliationBridge" class="reconciliation-bridge"></div></article>
+          <article class="card"><div class="card-heading"><div><p class="eyebrow">BINANCE</p><h2>幣安資產快照</h2></div><span class="status-pill" id="cryptoAsOf">未設定</span></div><div id="cryptoMetrics" class="bank-metrics"></div><button class="button button-soft full" id="editCryptoButton">更新幣安總資產</button></article>
+        </div>
+      </section>
+
+      <section id="settings" class="view">
+        <div class="settings-grid">
+          <article class="card"><div class="card-heading"><div><p class="eyebrow">ALLOCATION</p><h2>資金配置</h2></div></div><form id="allocationForm" class="form-grid"></form></article>
+          <article class="card"><div class="card-heading"><div><p class="eyebrow">CAPITAL</p><h2>信貸與資金來源</h2></div></div><form id="capitalForm" class="form-grid"></form></article>
+          <article class="card data-card"><div class="card-heading"><div><p class="eyebrow">DATA</p><h2>資料與備份</h2></div></div><p>所有私人紀錄只存在目前瀏覽器。換手機或清除網站資料前，請先匯出完整JSON。</p><div class="data-actions"><button class="button button-primary" id="exportButton"><span data-icon="download"></span>匯出完整備份</button><button class="button button-soft" id="settingsImportButton"><span data-icon="upload"></span>合併匯入</button><button class="button button-danger" id="resetButton">清除本機資料</button></div></article>
+            <article class="card"><div class="card-heading"><div><p class="eyebrow">ABOUT</p><h2>計算口徑</h2></div></div><ul class="rules"><li>股票採移動平均成本法。</li><li>同一帳戶、代號與幣別的連續持倉，歸零才算一筆完整交易。</li><li>未平倉不計勝率；沒有原始停損時，R multiple維持N/A。</li><li>幣安總損益以「最新資產－累計投入」為主，已實現用完整策略紀錄拆分。</li><li>信貸本金不是虧損；只有利息與手續費列入融資成本。</li></ul><div class="version-row"><span>Wealth Ledger</span><strong>v1.0.3</strong></div></article>
+        </div>
+      </section>
+    </main>
+
+    <nav class="bottom-nav" aria-label="手機導覽">
+      <button class="active" data-view="overview"><span data-icon="grid"></span>總覽</button>
+      <button data-view="holdings"><span data-icon="briefcase"></span>持倉</button>
+      <button data-view="transactions"><span data-icon="repeat"></span>交易</button>
+      <button data-view="performance"><span data-icon="chart"></span>績效</button>
+      <button data-view="more"><span data-icon="more"></span>更多</button>
+    </nav>
+  </div>
+
+  <dialog id="moreDialog" class="sheet-dialog"><div class="sheet-handle"></div><div class="sheet-head"><h2>更多功能</h2><button class="icon-button" data-close="moreDialog" aria-label="關閉"><span data-icon="x"></span></button></div><div class="more-grid"><button data-more-view="reconcile"><span data-icon="scale"></span><strong>對帳</strong><small>銀行、交割與幣安</small></button><button data-more-view="settings"><span data-icon="settings"></span><strong>設定</strong><small>配置、資金與備份</small></button></div></dialog>
+
+  <dialog id="tradeDialog" class="modal-dialog">
+    <form id="tradeForm" method="dialog">
+      <div class="dialog-head"><div><p class="eyebrow">TRANSACTION</p><h2>新增股票交易</h2></div><button type="button" class="icon-button" data-close="tradeDialog" aria-label="關閉"><span data-icon="x"></span></button></div>
+      <div class="form-grid two" id="tradeFields"></div>
+      <div class="dialog-actions"><button type="button" class="button button-soft" data-close="tradeDialog">取消</button><button type="submit" class="button button-primary">儲存交易</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="bankDialog" class="modal-dialog"><form id="bankForm" method="dialog"><div class="dialog-head"><div><p class="eyebrow">RECONCILIATION</p><h2>更新證券戶快照</h2></div><button type="button" class="icon-button" data-close="bankDialog" aria-label="關閉"><span data-icon="x"></span></button></div><div class="form-grid two" id="bankFields"></div><div class="dialog-actions"><button type="button" class="button button-soft" data-close="bankDialog">取消</button><button type="submit" class="button button-primary">更新快照</button></div></form></dialog>
+
+  <dialog id="cryptoDialog" class="modal-dialog"><form id="cryptoForm" method="dialog"><div class="dialog-head"><div><p class="eyebrow">BINANCE SNAPSHOT</p><h2>更新幣安總資產</h2></div><button type="button" class="icon-button" data-close="cryptoDialog" aria-label="關閉"><span data-icon="x"></span></button></div><div class="form-grid" id="cryptoFields"></div><div class="dialog-actions"><button type="button" class="button button-soft" data-close="cryptoDialog">取消</button><button type="submit" class="button button-primary">更新快照</button></div></form></dialog>
+
+  <dialog id="cryptoTradeDialog" class="modal-dialog"><form id="cryptoTradeForm" method="dialog"><div class="dialog-head"><div><p class="eyebrow">BINANCE STRATEGY</p><h2>新增幣安完整策略</h2></div><button type="button" class="icon-button" data-close="cryptoTradeDialog" aria-label="關閉"><span data-icon="x"></span></button></div><div class="form-grid two" id="cryptoTradeFields"></div><div class="dialog-actions"><button type="button" class="button button-soft" data-close="cryptoTradeDialog">取消</button><button type="submit" class="button button-primary">儲存策略</button></div></form></dialog>
+
+  <dialog id="quoteDialog" class="modal-dialog"><form id="quoteForm" method="dialog"><div class="dialog-head"><div><p class="eyebrow">MARKET PRICE</p><h2>更新股票行情</h2></div><button type="button" class="icon-button" data-close="quoteDialog" aria-label="關閉"><span data-icon="x"></span></button></div><div class="form-grid two" id="quoteFields"></div><div class="dialog-actions"><button type="button" class="button button-soft" data-close="quoteDialog">取消</button><button type="submit" class="button button-primary">更新行情</button></div></form></dialog>
+
+  <dialog id="transferDialog" class="modal-dialog"><form id="transferForm" method="dialog"><div class="dialog-head"><div><p class="eyebrow">INTERNAL TRANSFER</p><h2>記錄轉入幣安</h2></div><button type="button" class="icon-button" data-close="transferDialog" aria-label="關閉"><span data-icon="x"></span></button></div><div class="form-grid two" id="transferFields"></div><p class="section-note">這筆只移動投資資金，不會被計為損益；波段股票可動用與幣安累計投入會一起更新。</p><div class="dialog-actions"><button type="button" class="button button-soft" data-close="transferDialog">取消</button><button type="submit" class="button button-primary">儲存轉帳</button></div></form></dialog>
+
+  <input type="file" id="fileInput" accept="application/json,.json" hidden>
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <script src="ledger.js"></script>
+  <script src="app.js?v=1.0.3"></script>
+</body>
+</html>

@@ -1,0 +1,25 @@
+.toolbar-actions,
+.stack-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.stack-actions {
+  margin-top: 16px;
+  flex-direction: column;
+}
+
+@media (max-width: 760px) {
+  .toolbar-actions {
+    width: 100%;
+    align-items: stretch;
+  }
+
+  .toolbar-actions .search {
+    flex: 1;
+  }
+}
+[hidden] {
+  display: none !important;
+}

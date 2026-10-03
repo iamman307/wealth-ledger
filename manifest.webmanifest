@@ -1,0 +1,26 @@
+{
+  "name": "Wealth Ledger 私人投資總帳",
+  "short_name": "Wealth Ledger",
+  "description": "本機優先的股票、幣安、資金配置與投資績效帳本",
+  "lang": "zh-Hant",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#071019",
+  "theme_color": "#071019",
+  "icons": [
+    {
+      "src": "assets/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "assets/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}
