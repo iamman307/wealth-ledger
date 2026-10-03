@@ -1,10 +1,11 @@
-const CACHE = 'wealth-ledger-v1.0.6';
+const CACHE = 'wealth-ledger-v1.0.7';
 const ASSETS = [
   './',
   './index.html',
   './styles.css',
   './enhancements.css',
   './ledger.js',
+  './market.js',
   './app.js',
   './manifest.webmanifest',
   './assets/icon.svg',
@@ -27,6 +28,8 @@ self.addEventListener('activate', event => {
 
 self.addEventListener('fetch', event => {
   if (event.request.method !== 'GET') return;
+  // External market API requests can contain a personal key in the URL.
+  if (new URL(event.request.url).origin !== self.location.origin) return;
   event.respondWith(
     fetch(event.request)
       .then(response => {

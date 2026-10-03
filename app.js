@@ -1,8 +1,10 @@
 (() => {
   'use strict';
-  const APP_VERSION = '1.0.6';
+  const APP_VERSION = '1.0.7';
   const STORAGE_KEY = 'wealth-ledger-db-v1';
+  const MARKET_KEY = 'wealth-ledger-finnhub-key-v1';
   const state = { view: 'overview', holdingFilter: 'all', transactionFilter: 'all', performanceMode: 'returns', performanceScope: 'all', demo: false };
+  let quoteRefreshInFlight = false;
   let installPrompt = null;
   let db;
 
@@ -11,6 +13,10 @@
   const finite = value => value !== null && value !== '' && Number.isFinite(Number(value));
   const number = (value, fallback = 0) => finite(value) ? Number(value) : fallback;
   const dateValue = value => value ? new Date(value).getTime() : 0;
+  const displayTime = value => {
+    const date=new Date(value);
+    return Number.isFinite(date.getTime())?date.toLocaleString('zh-TW',{timeZone:'Asia/Taipei'}):'時間未記錄';
+  };
   const clone = value => JSON.parse(JSON.stringify(value));
   const escapeHtml = value => String(value ?? '').replace(/[&<>'"]/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[char]));
   const money = (value, digits = 0) => finite(value) ? new Intl.NumberFormat('zh-TW',{maximumFractionDigits:digits,minimumFractionDigits:digits}).format(Number(value)) : '—';
@@ -172,6 +178,8 @@
   function renderNotice(p){
     const messages=[];
     if(p.missingQuotes)messages.push(`缺少行情：${p.positionRows.filter(row=>!finite(row.marketValueTwd)).map(row=>row.ticker).join('、')}，總損益暫不完整`);
+    const stale=p.positionRows.filter(row=>row.quote?.updated&&Date.now()-dateValue(row.quote.updated)>7*864e5).map(row=>row.ticker);
+    if(stale.length)messages.push(`行情超過 7 天：${stale.join('、')}，請更新後再看現值`);
     if(p.computed.issues.length)messages.push(`交易待補：${p.computed.issues.join('；')}`);
     if(currentFx()<=1)messages.push('尚未設定有效的 USD/TWD 參考匯率，跨幣別損益暫不完整');
     if(!p.securities.configured)messages.push('尚未設定證券戶現金快照，總資產暫不完整');
@@ -228,7 +236,7 @@
     const ext=(db.externalHoldings||[]).map(h=>({kind:'crypto',account:'crypto',ticker:h.ticker,asset:h.asset,qty:h.qty,cost:finite(h.avgCost)?h.avgCost*h.qty*number(h.fx,1):NaN,market:finite(h.marketValueTwd)?h.marketValueTwd:number(h.qty)*number(h.currentPrice)*number(h.fx,1),pnl:finite(h.unrealizedTwd)?Number(h.unrealizedTwd):NaN,ret:finite(h.unrealizedTwd)&&finite(h.avgCost)&&h.avgCost*h.qty*h.fx?Number(h.unrealizedTwd)/(h.avgCost*h.qty*h.fx)*100:NaN,price:h.currentPrice,currency:h.currency,asOf:h.asOf}));
     const rows=[...stockRows,...ext].filter(r=>(state.holdingFilter==='all'||r.account===state.holdingFilter||(state.holdingFilter==='crypto'&&r.kind==='crypto'))&&(!query||r.ticker.includes(query)||String(r.asset).toUpperCase().includes(query))).sort((a,b)=>(finite(b.pnl)?Math.abs(b.pnl):0)-(finite(a.pnl)?Math.abs(a.pnl):0));
     $('holdingSummary').innerHTML=[metric('股票持倉市值',`NT$${money(p.stockMarket)}`,'不含幣安'),metric('幣安資產',`NT$${money(p.crypto.value)}`,p.crypto.asOf?p.crypto.asOf.slice(0,10):'未設定'),metric('股票未實現',`${signedMoney(p.stockUnrealized)} 元`,'行情完整後計算',tone(p.stockUnrealized)),metric('最大損益貢獻',rows.length?`${signedMoney(rows[0].pnl)} 元`:'—',rows[0]?.ticker||'',tone(rows[0]?.pnl))].join('');
-    $('holdingsTable').innerHTML=`<thead><tr><th>資產</th><th>帳戶</th><th>數量</th><th>成本 TWD</th><th>現值 TWD</th><th>未實現</th><th>報酬率</th><th>現價</th></tr></thead><tbody>${rows.length?rows.map(r=>`<tr><td><div class="asset-cell"><span class="ticker-avatar">${escapeHtml(r.ticker.slice(0,3))}</span><div><strong>${escapeHtml(r.ticker)}</strong><small>${escapeHtml(r.asset||'')}</small></div></div></td><td><span class="account-chip ${r.account==='波段'?'swing':r.account==='crypto'?'crypto':''}">${r.account==='crypto'?'幣安':escapeHtml(r.account)}</span></td><td>${money(r.qty,4)}</td><td>${money(r.cost)}</td><td>${money(r.market)}</td><td class="${tone(r.pnl)}">${signedMoney(r.pnl)}</td><td class="${tone(r.ret)}">${percent(r.ret)}</td><td>${money(r.price,4)} ${escapeHtml(r.currency)}</td></tr>`).join(''):'<tr><td colspan="8" class="empty-row">沒有符合條件的持倉</td></tr>'}</tbody>`;
+    $('holdingsTable').innerHTML=`<thead><tr><th>資產</th><th>帳戶</th><th>數量</th><th>成本 TWD</th><th>現值 TWD</th><th>未實現</th><th>報酬率</th><th>現價／行情時間</th></tr></thead><tbody>${rows.length?rows.map(r=>`<tr><td><div class="asset-cell"><span class="ticker-avatar">${escapeHtml(r.ticker.slice(0,3))}</span><div><strong>${escapeHtml(r.ticker)}</strong><small>${escapeHtml(r.asset||'')}</small></div></div></td><td><span class="account-chip ${r.account==='波段'?'swing':r.account==='crypto'?'crypto':''}">${r.account==='crypto'?'幣安':escapeHtml(r.account)}</span></td><td>${money(r.qty,4)}</td><td>${money(r.cost)}</td><td>${money(r.market)}</td><td class="${tone(r.pnl)}">${signedMoney(r.pnl)}</td><td class="${tone(r.ret)}">${percent(r.ret)}</td><td>${money(r.price,4)} ${escapeHtml(r.currency)}<br><small>${escapeHtml(r.asOf?displayTime(r.asOf):'未更新')}</small></td></tr>`).join(''):'<tr><td colspan="8" class="empty-row">沒有符合條件的持倉</td></tr>'}</tbody>`;
   }
 
   function renderTransactions(p){
@@ -298,6 +306,48 @@
     $('allocationForm').innerHTML=`${inputField('longTerm','長期配置（TWD）',plan.longTerm)}${inputField('swing','波段配置（TWD）',plan.swing)}${inputField('loan','信貸扣款保留（TWD）',plan.loan)}${inputField('reserve','緊急預備金（TWD）',plan.reserve)}<div class="form-actions"><button class="button button-primary" type="submit">儲存配置</button></div>`;
     $('capitalForm').innerHTML=`${inputField('resetDate','追蹤起始日',cap.resetDate,'date')}${inputField('loanGross','信貸原始本金',cap.loanGross)}${inputField('loanFee','開辦／手續費',cap.loanFee)}${inputField('principalRepaid','已還本金',cap.principalRepaid)}${inputField('interestPaid','累計利息',cap.interestPaid)}${inputField('cashAdjustmentTwd','現金校正',cap.cashAdjustmentTwd)}<div class="form-actions"><button class="button button-primary" type="submit">儲存資金設定</button></div>`;
     $('allocationForm').onsubmit=saveAllocation;$('capitalForm').onsubmit=saveCapital;
+    $('marketKeyStatus').textContent=localStorage.getItem(MARKET_KEY)?'這台裝置已設定；金鑰不包含在備份內。':'尚未設定。設定一次後可自動更新美股持倉行情。';
+  }
+
+  function saveMarketKey(event){
+    event.preventDefault();
+    const key=$('marketKey').value.trim();
+    if(key)localStorage.setItem(MARKET_KEY,key);
+    $('marketKey').value='';
+    if(!localStorage.getItem(MARKET_KEY)){showNotice('請先貼上 Finnhub API 金鑰','error');return;}
+    renderSettings();
+    refreshQuotes(true);
+  }
+
+  async function refreshQuotes(force=false){
+    if(quoteRefreshInFlight)return;
+    const key=localStorage.getItem(MARKET_KEY);
+    if(!key){showView('settings');showNotice('先在設定頁填入個人的 Finnhub API 金鑰，就能自動抓美股現價','error');return;}
+    const fx=currentFx();
+    if(!(fx>1)){showNotice('請先匯入完整備份，或設定有效的 USD/TWD 匯率，再更新美元股票行情','error');return;}
+    const positions=Ledger.compute(db).positions.filter(p=>p.qty>1e-9);
+    const stocks=[...new Set(positions.filter(p=>p.currency==='USD'&&!p.ticker.startsWith('DEMO-')).map(p=>p.ticker))];
+    const now=Date.now();
+    const wanted=stocks.filter(ticker=>force||!db.quotes[ticker]||now-Date.parse(db.quotes[ticker].fetchedAt||db.quotes[ticker].updated||'')>6*36e5);
+    if(!wanted.length){if(force)toast('沒有需要更新的美股持倉');return;}
+    const button=$('autoQuoteButton');quoteRefreshInFlight=true;button.disabled=true;button.textContent='抓取中…';
+    try{
+      const fetched=await Promise.allSettled(wanted.map(ticker=>MarketQuotes.fetchQuote(ticker,key)));
+      if(localStorage.getItem(MARKET_KEY)!==key)return;
+      const next=clone(db),errors=[];let count=0;
+      fetched.forEach((result,index)=>{
+        const ticker=wanted[index];
+        if(result.status==='rejected'){errors.push(`${ticker}：${result.reason?.message||'連線失敗'}`);return;}
+        const current=next.quotes[ticker];
+        if(current&&Date.parse(current.fetchedAt||current.updated||'')>now)return;
+        next.quotes[ticker]={...result.value,fx:currentFx(next),currency:'USD'};
+        count++;
+      });
+      if(count){db=Ledger.applyPolicy(next);saveDb(`已更新 ${count} 檔美股行情`);}
+      if(errors.length)showNotice(`未更新：${errors.join('；')}。舊行情仍保留，可稍後重試或手動輸入。`,'error');
+      else if(!count&&force)toast('行情沒有更新');
+    }catch(error){showNotice(`行情儲存失敗：${error.message}`,'error');}
+    finally{quoteRefreshInFlight=false;button.disabled=false;button.textContent='自動抓行情';}
   }
 
   function saveAllocation(event){
@@ -324,7 +374,7 @@
     try{
       const next=clone(db);next.transactions.push(transaction);
       if(f.get('tradePending')){const cash=Ledger.normalizeSecuritiesCash(next.meta.securitiesCash);if(!cash.enabled||!cash.asOf)throw Error('請先在對帳頁設定證券戶快照');cash.pendingSettlements.push(Ledger.pendingSettlementFromTransaction(transaction));next.meta.securitiesCash=cash;}
-      const checked=Ledger.applyPolicy(next);const issues=Ledger.compute(checked).issues;if(issues.length)throw Error(issues.join('\n'));db=checked;$('tradeDialog').close();saveDb('交易已新增');
+      const checked=Ledger.applyPolicy(next);const issues=Ledger.compute(checked).issues;if(issues.length)throw Error(issues.join('\n'));db=checked;$('tradeDialog').close();saveDb('交易已新增');if(localStorage.getItem(MARKET_KEY))refreshQuotes(false);
     }catch(error){showNotice(error.message,'error')}
   }
 
@@ -400,6 +450,7 @@
       const currentHasData=db.transactions.length||db.manualTrades.length||db.externalHoldings.length;
       if(!currentHasData){db=Ledger.applyPolicy(incoming)}else{const merged=Ledger.merge(db,Ledger.applyPolicy(incoming));db=merged.db;toast(`新增 ${merged.report.txAdded} 筆股票、${merged.report.manualAdded} 筆策略`)}
       saveDb('資料匯入完成');
+      if(localStorage.getItem(MARKET_KEY))refreshQuotes(false);
     }catch(error){showNotice(`匯入失敗：${error.message}`,'error')}
     $('fileInput').value='';
   }
@@ -422,12 +473,15 @@
     $('editCryptoButton').onclick=openCryptoDialog;$('cryptoForm').onsubmit=saveCrypto;
     $('cryptoTradeButton').onclick=openCryptoTradeDialog;$('cryptoTradeForm').onsubmit=saveCryptoTrade;
     $('quoteButton').onclick=openQuoteDialog;$('quoteForm').onsubmit=saveQuote;
+    $('autoQuoteButton').onclick=()=>refreshQuotes(true);
+    $('marketKeyForm').onsubmit=saveMarketKey;
+    $('removeMarketKey').onclick=()=>{localStorage.removeItem(MARKET_KEY);$('marketKey').value='';renderSettings();toast('這台裝置的行情金鑰已移除')};
     $('transferButton').onclick=openTransferDialog;$('transferForm').onsubmit=saveTransfer;
     [$('importButton'),$('emptyImportButton'),$('settingsImportButton')].forEach(button=>button.onclick=()=>$('fileInput').click());
     $('fileInput').onchange=event=>event.target.files[0]&&importFile(event.target.files[0]);
     $('exportButton').onclick=exportDb;
     $('demoButton').onclick=()=>{db=demoDb();state.demo=true;render();toast('目前是示範資料，不會儲存')};
-    $('resetButton').onclick=()=>{if(confirm('這會清除目前裝置內的全部投資資料。請確認已匯出備份。')){localStorage.removeItem(STORAGE_KEY);db=emptyDb();state.demo=false;render();showView('overview');toast('本機資料已清除')}};
+    $('resetButton').onclick=()=>{if(confirm('這會清除目前裝置內的全部投資資料與行情金鑰。請確認已匯出備份。')){localStorage.removeItem(STORAGE_KEY);localStorage.removeItem(MARKET_KEY);db=emptyDb();state.demo=false;render();showView('overview');toast('本機資料已清除')}};
     $('holdingSearch').oninput=()=>renderHoldings(portfolio());$('transactionSearch').oninput=()=>renderTransactions(portfolio());
     all('#holdingFilter button').forEach(button=>button.onclick=()=>{state.holdingFilter=button.dataset.filter;all('#holdingFilter button').forEach(x=>x.classList.toggle('active',x===button));renderHoldings(portfolio())});
     all('#transactionFilter button').forEach(button=>button.onclick=()=>{state.transactionFilter=button.dataset.filter;all('#transactionFilter button').forEach(x=>x.classList.toggle('active',x===button));renderTransactions(portfolio())});
@@ -438,5 +492,6 @@
   }
 
   injectIcons(); bindEvents(); render(); showView('overview');
+  if(localStorage.getItem(MARKET_KEY))setTimeout(()=>refreshQuotes(false),800);
   if('serviceWorker' in navigator)window.addEventListener('load',()=>navigator.serviceWorker.register('./sw.js').catch(console.error));
 })();
