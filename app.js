@@ -1,9 +1,9 @@
 (() => {
   'use strict';
-  const APP_VERSION = '1.0.9';
+  const APP_VERSION = '1.1.0';
   const STORAGE_KEY = 'wealth-ledger-db-v1';
   const MARKET_KEY = 'wealth-ledger-finnhub-key-v1';
-  const state = { view: 'overview', holdingFilter: 'all', transactionFilter: 'all', performanceMode: 'returns', performanceScope: 'all', demo: false };
+  const state = { view: 'overview', holdingFilter: 'all', transactionFilter: 'all', performanceMode: 'returns', performanceScope: 'all', settlementTransactionId: '', demo: false };
   let quoteRefreshInFlight = false;
   let installPrompt = null;
   let db;
@@ -304,7 +304,11 @@
     const s=p.securities;
     $('bankAsOf').textContent=s.configured?s.asOf.slice(0,10):'未設定';
     $('bankMetrics').innerHTML=[['帳面餘額',s.accountBalanceTwd],['已圈存',-s.reservedTwd],['目前可用',s.availableTwd],['待交割',s.pendingTwd],['交割後預估',s.postSettlementTwd],['累計轉至幣安',-p.cryptoFunding]].map(x=>`<div><span>${x[0]}</span><strong class="${tone(x[1])}">${signedMoney(x[1])}</strong></div>`).join('');
-    $('pendingList').innerHTML=s.pendingSettlements.length?s.pendingSettlements.map(item=>`<div class="pending-item"><span><strong>${escapeHtml(item.ticker||'未命名')}・${item.side==='BUY'?'買進':'賣出'}</strong><small>${escapeHtml(item.date.slice(0,16).replace('T',' '))}</small></span><strong class="${tone(item.amount*item.fx)}">${signedMoney(item.amount*item.fx)}</strong></div>`).join(''):'<div class="empty-row">目前沒有待交割款</div>';
+    const pendingIds=new Set(s.pendingSettlements.map(item=>item.transactionId||(item.id.startsWith('settlement-')?item.id.slice('settlement-'.length):'')));
+    $('pendingList').innerHTML=s.pendingSettlements.length?s.pendingSettlements.map(item=>{const transactionId=item.transactionId||(item.id.startsWith('settlement-')?item.id.slice('settlement-'.length):'');return `<div class="pending-item"><span class="pending-copy"><strong>${escapeHtml(item.ticker||'未命名')}・${item.side==='BUY'?'買進':'賣出'}</strong><small>${escapeHtml(item.date.slice(0,16).replace('T',' '))}・暫估匯率 ${money(item.fx,4)}</small></span><span class="pending-actions"><strong class="${tone(item.amount*item.fx)}">${signedMoney(item.amount*item.fx)}</strong>${transactionId?`<button class="button button-soft button-compact" data-settle-id="${escapeHtml(transactionId)}">完成</button>`:''}</span></div>`}).join(''):'<div class="empty-row">目前沒有待交割款</div>';
+    const estimates=db.transactions.filter(transaction=>transaction.fxStatus==='estimate'&&['BUY','SELL'].includes(transaction.side)&&!pendingIds.has(transaction.id)).sort((a,b)=>dateValue(b.date)-dateValue(a.date));
+    $('fxEstimateList').innerHTML=estimates.length?estimates.map(transaction=>`<div class="pending-item"><span class="pending-copy"><strong>${escapeHtml(transaction.ticker)}・${transaction.side==='BUY'?'買進':'賣出'}</strong><small>${escapeHtml(transaction.date.slice(0,16).replace('T',' '))}・暫估匯率 ${money(transaction.fx,4)}</small></span><span class="pending-actions"><strong>${money(Ledger.transactionValueTwd(transaction))}</strong><button class="button button-soft button-compact" data-settle-id="${escapeHtml(transaction.id)}">核銷</button></span></div>`).join(''):'<div class="empty-row">沒有待確認匯率</div>';
+    all('[data-settle-id]').forEach(button=>button.onclick=()=>openSettlementDialog(button.dataset.settleId));
     const model=p.funds.investmentAvailable; const gap=s.configured?model-s.postSettlementTwd:NaN;
     $('reconciliationBridge').innerHTML=`<div class="reconcile-row"><span>長期策略可動用</span><strong>${money(p.funds.buckets['長期'].available)}</strong></div><div class="reconcile-row"><span>波段股票可動用</span><strong>${money(p.funds.swingAvailableTwd)}</strong></div><div class="reconcile-row"><span>歷史現金校正</span><strong class="${tone(p.funds.cashAdjustmentTwd)}">${signedMoney(p.funds.cashAdjustmentTwd)}</strong></div><div class="reconcile-row total"><span>股票配置模型</span><strong>${money(model)}</strong></div><div class="reconcile-row"><span>銀行交割後預估</span><strong>${money(s.postSettlementTwd)}</strong></div><div class="reconcile-row total"><span>待對帳差額</span><strong class="${tone(gap)}">${signedMoney(gap)}</strong></div>`;
     $('cryptoAsOf').textContent=p.crypto.asOf?p.crypto.asOf.slice(0,10):'未設定';
@@ -389,18 +393,48 @@
   }
 
   function openTradeDialog(){
-    $('tradeFields').innerHTML=`${inputField('tradeDate','日期時間',isoLocal(),'datetime-local','required')}${inputField('tradeTicker','股票代號','','text','required placeholder="例如 ABC"')}<div class="field"><label for="tradeAccount">資金帳戶</label><select id="tradeAccount" name="tradeAccount"><option value="波段">波段</option><option value="長期">長期</option></select></div><div class="field"><label for="tradeSide">動作</label><select id="tradeSide" name="tradeSide"><option value="BUY">買進</option><option value="SELL">賣出</option><option value="INIT">期初持倉</option></select></div><div class="field"><label for="tradeAsset">資產類型</label><select id="tradeAsset" name="tradeAsset"><option>美股</option><option>台股</option><option>ETF</option></select></div>${inputField('tradeQty','數量','', 'number','step="any" min="0" required')}${inputField('tradePrice','成交價格','', 'number','step="any" min="0" required')}${inputField('tradeFee','手續費',0,'number','step="any" min="0"')}${inputField('tradeTax','交易稅',0,'number','step="any" min="0"')}<div class="field"><label for="tradeCurrency">計價幣別</label><select id="tradeCurrency" name="tradeCurrency"><option value="USD">USD</option><option value="TWD">TWD</option></select></div>${inputField('tradeFx','成交匯率',currentFx()>1?currentFx():'','number','step="any" min="0.000001" required')}<div class="field full"><label><input id="tradePending" name="tradePending" type="checkbox" style="width:auto;min-height:auto;margin-right:7px">尚未從銀行扣款／入帳，加入待交割</label></div>`;
+    $('tradeFields').innerHTML=`${inputField('tradeDate','日期時間',isoLocal(),'datetime-local','required')}${inputField('tradeTicker','股票代號','','text','required placeholder="例如 ABC"')}<div class="field"><label for="tradeAccount">資金帳戶</label><select id="tradeAccount" name="tradeAccount"><option value="波段">波段</option><option value="長期">長期</option></select></div><div class="field"><label for="tradeSide">動作</label><select id="tradeSide" name="tradeSide"><option value="BUY">買進</option><option value="SELL">賣出</option><option value="INIT">期初持倉</option></select></div><div class="field"><label for="tradeAsset">資產類型</label><select id="tradeAsset" name="tradeAsset"><option>美股</option><option>台股</option><option>ETF</option></select></div>${inputField('tradeQty','數量','', 'number','step="any" min="0" required')}${inputField('tradePrice','成交價格','', 'number','step="any" min="0" required')}${inputField('tradeFee','手續費',0,'number','step="any" min="0"')}${inputField('tradeTax','交易稅',0,'number','step="any" min="0"')}<div class="field"><label for="tradeCurrency">計價幣別</label><select id="tradeCurrency" name="tradeCurrency"><option value="USD">USD</option><option value="TWD">TWD</option></select></div>${inputField('tradeFx','參考／試算匯率',currentFx()>1?currentFx():'','number','step="any" min="0.000001" required')}<div class="field full"><label><input id="tradeFxFinal" name="tradeFxFinal" type="checkbox" style="width:auto;min-height:auto;margin-right:7px">這已是最終交割匯率</label></div><div class="field full"><label><input id="tradePending" name="tradePending" type="checkbox" checked style="width:auto;min-height:auto;margin-right:7px">銀行尚未扣款／入帳，加入待交割</label></div><p class="section-note field full">只有試算匯率時直接填它；交割後再到對帳頁「完成交割」回填實際金額。</p>`;
     $('tradeTicker').addEventListener('input',()=>{const ticker=$('tradeTicker').value.trim().toUpperCase();const known=db.transactions.find(t=>t.ticker===ticker);if(known)$('tradeAccount').value=known.account;});
+    $('tradeSide').addEventListener('change',()=>{const initial=$('tradeSide').value==='INIT';$('tradePending').disabled=initial;if(initial)$('tradePending').checked=false;});
+    $('tradeCurrency').addEventListener('change',()=>{const twd=$('tradeCurrency').value==='TWD';$('tradeFx').value=twd?1:(currentFx()>1?currentFx():'');$('tradeFxFinal').checked=twd;$('tradeFxFinal').disabled=twd;});
     $('tradeDialog').showModal();
   }
 
   function saveTrade(event){
     event.preventDefault();const f=new FormData(event.currentTarget);const ticker=String(f.get('tradeTicker')).trim().toUpperCase();const currency=String(f.get('tradeCurrency'));
-    const transaction={id:crypto.randomUUID(),date:String(f.get('tradeDate')),account:String(f.get('tradeAccount')),ticker,asset:String(f.get('tradeAsset')),side:String(f.get('tradeSide')),qty:number(f.get('tradeQty')),price:number(f.get('tradePrice')),fee:number(f.get('tradeFee')),tax:number(f.get('tradeTax')),fx:currency==='TWD'?1:number(f.get('tradeFx')),currency,stop:null,exitReason:'',note:''};
+    const fxFinal=currency==='TWD'||Boolean(f.get('tradeFxFinal'));
+    const transaction={id:crypto.randomUUID(),date:String(f.get('tradeDate')),account:String(f.get('tradeAccount')),ticker,asset:String(f.get('tradeAsset')),side:String(f.get('tradeSide')),qty:number(f.get('tradeQty')),price:number(f.get('tradePrice')),fee:number(f.get('tradeFee')),tax:number(f.get('tradeTax')),fx:currency==='TWD'?1:number(f.get('tradeFx')),fxStatus:fxFinal?'final':'estimate',currency,stop:null,exitReason:'',note:fxFinal?'':'成交時先以參考／試算匯率記錄，待實際交割後回填。'};
     try{
       const next=clone(db);next.transactions.push(transaction);
       if(f.get('tradePending')){const cash=Ledger.normalizeSecuritiesCash(next.meta.securitiesCash);if(!cash.enabled||!cash.asOf)throw Error('請先在對帳頁設定證券戶快照');cash.pendingSettlements.push(Ledger.pendingSettlementFromTransaction(transaction));next.meta.securitiesCash=cash;}
       const checked=Ledger.applyPolicy(next);const issues=Ledger.compute(checked).issues;if(issues.length)throw Error(issues.join('\n'));db=checked;$('tradeDialog').close();saveDb('交易已新增');if(localStorage.getItem(MARKET_KEY))refreshQuotes(false);
+    }catch(error){showNotice(error.message,'error')}
+  }
+
+  function openSettlementDialog(transactionId){
+    const transaction=db.transactions.find(item=>item.id===transactionId);
+    if(!transaction){showNotice('找不到這筆交易','error');return;}
+    const fees=(transaction.fee||0)+(transaction.tax||0),gross=transaction.qty*transaction.price;
+    const baseAmount=transaction.side==='BUY'?gross+fees:gross-fees;
+    state.settlementTransactionId=transaction.id;
+    $('settlementSummary').innerHTML=`<strong>${escapeHtml(transaction.ticker)}・${transaction.side==='BUY'?'買進':'賣出'} ${money(transaction.qty,4)} 股</strong><small>${money(baseAmount,2)} ${escapeHtml(transaction.currency)}・目前暫估匯率 ${money(transaction.fx,4)}・約 NT$${money(baseAmount*transaction.fx)}</small>`;
+    $('settlementFields').innerHTML=`${inputField('settlementDate','實際交割時間',isoLocal(),'datetime-local','required')}${inputField('settlementActualTwd','實際台幣扣款／入帳','', 'number','step="any" min="0" placeholder="有單筆金額時填這裡"')}${inputField('settlementActualFx','實際匯率（擇一填）','', 'number','step="any" min="0" placeholder="淨額換匯時可填批次匯率"')}`;
+    const updatePreview=()=>{
+      const actualTwd=number($('settlementActualTwd').value,NaN),actualFx=number($('settlementActualFx').value,NaN);
+      const fx=actualTwd>0?actualTwd/baseAmount:actualFx;
+      const twd=actualTwd>0?actualTwd:actualFx>0?baseAmount*actualFx:NaN;
+      $('settlementPreview').textContent=finite(fx)&&finite(twd)?`完成後：實際匯率 ${money(fx,4)}・台幣金額 NT$${money(twd)}`:'填寫任一項後，這裡會試算最終匯率與台幣金額。';
+    };
+    $('settlementActualTwd').oninput=updatePreview;$('settlementActualFx').oninput=updatePreview;updatePreview();
+    $('settlementDialog').showModal();
+  }
+
+  function saveSettlement(event){
+    event.preventDefault();const f=new FormData(event.currentTarget);
+    try{
+      db=Ledger.completeTransactionSettlement(db,{transactionId:state.settlementTransactionId,settledAt:String(f.get('settlementDate')),actualTwd:number(f.get('settlementActualTwd'),NaN),actualFx:number(f.get('settlementActualFx'),NaN)});
+      const transaction=db.transactions.find(item=>item.id===state.settlementTransactionId);
+      state.settlementTransactionId='';$('settlementDialog').close();saveDb(`${transaction.ticker} 交割已完成，實際匯率 ${money(transaction.fx,4)}`);
     }catch(error){showNotice(error.message,'error')}
   }
 
@@ -507,6 +541,7 @@
     all('[data-more-view]').forEach(button=>button.onclick=()=>{$('moreDialog').close();showView(button.dataset.moreView)});
     all('[data-close]').forEach(button=>button.onclick=()=>$(button.dataset.close).close());
     $('quickAddButton').onclick=openTradeDialog;$('tradeForm').onsubmit=saveTrade;
+    $('settlementForm').onsubmit=saveSettlement;
     $('editBankButton').onclick=openBankDialog;$('bankForm').onsubmit=saveBank;
     $('stockFundingButton').onclick=openStockFundingDialog;$('stockFundingForm').onsubmit=saveStockFunding;
     $('editCryptoButton').onclick=openCryptoDialog;$('cryptoForm').onsubmit=saveCrypto;

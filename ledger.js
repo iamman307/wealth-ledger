@@ -1,7 +1,7 @@
 /* Wealth Ledger calculation engine. Private account policy lives in imported data. */
 (function(root){
   'use strict';
-  const VERSION='6.13.0';
+  const VERSION='6.14.0';
   const LONG_TERM_TICKERS=Object.freeze([]);
   const DEFAULT_FUND_PLAN=Object.freeze({longTerm:0,swing:0,loan:0,reserve:0,locked:false});
   const CAPITAL_SOURCE_KEYS=Object.freeze(['loan','self','family']);
@@ -88,7 +88,8 @@
       if(!date||!Number.isFinite(Date.parse(date)))throw Error(label+' 日期錯誤');
       if(!currency||!finite(amount)||amount===0)throw Error(label+' 金額或幣別錯誤');
       if(!finite(fx)||fx<=0)throw Error(label+' 匯率錯誤');
-      return {id,date,currency,amount,fx,ticker:String(raw.ticker||''),side:String(raw.side||''),note:String(raw.note||'')};
+      const transactionId=String(raw.transactionId||(id.startsWith('settlement-')?id.slice('settlement-'.length):''));
+      return {id,date,currency,amount,fx,ticker:String(raw.ticker||''),side:String(raw.side||''),transactionId,note:String(raw.note||'')};
     });
     return {enabled,asOf,accountBalanceTwd,reservedTwd,externalInvestmentTransfersTwd,externalTransfers,investmentContributions,pendingSettlements};
   }
@@ -169,6 +170,8 @@
       for(const k of ['qty','price','fx'])if(!finite(t[k])||t[k]<=0)throw Error(label+' '+k+' 必須大於 0');
       for(const k of ['fee','tax']){if(has(t[k])&&(!finite(t[k])||t[k]<0))throw Error(label+' '+k+' 格式錯誤');}
       for(const k of ['stop','brokerPnlBase','brokerPnlTwd','tradeReturnPct','settlementTwd','originalRiskBase','RMultiple'])if(has(t[k])&&!finite(t[k]))throw Error(label+' '+k+' 必須是數字或 null');
+      if(has(t.fxStatus)&&!['estimate','final'].includes(t.fxStatus))throw Error(label+' 匯率狀態錯誤');
+      if(has(t.settledAt)&&!Number.isFinite(Date.parse(t.settledAt)))throw Error(label+' 交割日期錯誤');
       if(t.currency==='TWD'&&t.fx!==1)throw Error(label+' 台幣匯率必須為 1');
       if(has(t.originalRiskBase)&&t.originalRiskBase<=0)throw Error(label+' 原始風險必須大於 0');
       if(has(t.brokerPnlScope)&&!['execution','position'].includes(t.brokerPnlScope))throw Error(label+' 券商損益範圍錯誤');
@@ -259,7 +262,30 @@
     if(!finite(gross)||gross<=0||!finite(fees)||fees<0||!finite(fx)||fx<=0)throw Error('交易金額或匯率錯誤，無法建立待交割款');
     const amount=t.side==='BUY'?-(gross+fees):gross-fees;
     if(!finite(amount)||amount===0||(t.side==='SELL'&&amount<0))throw Error('待交割金額錯誤');
-    return {id:'settlement-'+t.id,date:t.date,currency:t.currency,amount,fx,ticker:t.ticker,side:t.side,note:'由交易自動建立；交割後請以銀行實際帳面餘額結清。'};
+    return {id:'settlement-'+t.id,date:t.date,currency:t.currency,amount,fx,ticker:t.ticker,side:t.side,transactionId:t.id,note:'由交易自動建立；匯率與台幣金額為暫估，交割後請完成核銷。'};
+  }
+  function completeTransactionSettlement(data,input){
+    const d=applyPolicy(data),raw=input&&typeof input==='object'&&!Array.isArray(input)?input:{};
+    const transactionId=String(raw.transactionId||''),settledAt=String(raw.settledAt||'');
+    const index=d.transactions.findIndex(t=>t.id===transactionId);
+    if(index<0)throw Error('找不到要完成交割的交易');
+    const transaction=d.transactions[index];
+    if(!['BUY','SELL'].includes(transaction.side))throw Error('只有買進或賣出可以完成交割');
+    if(!settledAt||!Number.isFinite(Date.parse(settledAt)))throw Error('請填寫正確的交割日期');
+    const gross=transaction.qty*transaction.price,fees=(transaction.fee||0)+(transaction.tax||0);
+    const baseAmount=transaction.side==='BUY'?gross+fees:gross-fees;
+    if(!finite(baseAmount)||baseAmount<=0)throw Error('交割金額錯誤');
+    const enteredTwd=Number(raw.actualTwd),enteredFx=Number(raw.actualFx);
+    const hasTwd=finite(enteredTwd)&&enteredTwd>0,hasFx=finite(enteredFx)&&enteredFx>0;
+    if(!hasTwd&&!hasFx)throw Error('請填實際台幣金額或實際匯率');
+    const actualFx=transaction.currency==='TWD'?1:(hasTwd?enteredTwd/baseAmount:enteredFx);
+    const actualTwd=hasTwd?enteredTwd:baseAmount*actualFx;
+    if(!finite(actualFx)||actualFx<=0||!finite(actualTwd)||actualTwd<=0)throw Error('實際交割資料錯誤');
+    d.transactions[index]={...transaction,fx:actualFx,settlementTwd:actualTwd,fxStatus:'final',settledAt};
+    const cash=normalizeSecuritiesCash(d.meta.securitiesCash);
+    cash.pendingSettlements=cash.pendingSettlements.filter(item=>item.transactionId!==transactionId&&item.id!=='settlement-'+transactionId);
+    d.meta.securitiesCash=cash;
+    return applyPolicy(d);
   }
   function externalFundingTwd(data){
     const seen=new Set();let total=0;
@@ -444,7 +470,7 @@
     const aw=avg(ratedWins),al=Math.abs(avg(ratedLosses));
     return {count:completed.length,returnCount:rated.length,winRate:completed.length?wins.length/completed.length*100:NaN,avgWin:aw,avgLoss:al,payoff:al>0?aw/al:NaN,expectancy:avg(rated)};
   }
-  const api={VERSION,LONG_TERM_TICKERS,DEFAULT_FUND_PLAN,DEFAULT_CAPITAL_TRACKING,DEFAULT_SECURITIES_CASH,CAPITAL_SOURCE_KEYS,validate,compute,merge,stats,moneyStats,sameManual,manualKey,classifyAccount,normalizeFundPlan,normalizeCapitalTracking,normalizeSecuritiesCash,parseCapitalSetup,applyPolicy,fundSummary,securitiesCashSummary,externalFundingTwd,capitalSummary,transactionValueTwd,pendingSettlementFromTransaction,recordExternalInvestmentTransfer,recordSecuritiesContribution};
+  const api={VERSION,LONG_TERM_TICKERS,DEFAULT_FUND_PLAN,DEFAULT_CAPITAL_TRACKING,DEFAULT_SECURITIES_CASH,CAPITAL_SOURCE_KEYS,validate,compute,merge,stats,moneyStats,sameManual,manualKey,classifyAccount,normalizeFundPlan,normalizeCapitalTracking,normalizeSecuritiesCash,parseCapitalSetup,applyPolicy,fundSummary,securitiesCashSummary,externalFundingTwd,capitalSummary,transactionValueTwd,pendingSettlementFromTransaction,completeTransactionSettlement,recordExternalInvestmentTransfer,recordSecuritiesContribution};
   if(typeof module!=='undefined'&&module.exports)module.exports=api;
   root.Ledger=api;
 })(typeof globalThis!=='undefined'?globalThis:this);

@@ -9,7 +9,7 @@
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="assets/icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="assets/icon-192.png">
-  <link rel="stylesheet" href="styles.css?v=1.0.8">
+  <link rel="stylesheet" href="styles.css?v=1.1.0">
   <link rel="stylesheet" href="enhancements.css?v=1.0.6">
 </head>
 <body>
@@ -142,7 +142,7 @@
 
       <section id="reconcile" class="view">
         <div class="reconcile-layout">
-          <article class="card bank-card"><div class="card-heading"><div><p class="eyebrow">SECURITIES CASH</p><h2>證券交割戶</h2></div><span class="status-pill" id="bankAsOf">未設定</span></div><div id="bankMetrics" class="bank-metrics"></div><div id="pendingList" class="pending-list"></div><div class="stack-actions"><button class="button button-soft full" id="editBankButton">更新銀行快照</button><button class="button button-primary full" id="stockFundingButton">記錄新增股票投入</button><button class="button button-soft full" id="transferButton">記錄轉入幣安</button></div></article>
+          <article class="card bank-card"><div class="card-heading"><div><p class="eyebrow">SECURITIES CASH</p><h2>證券交割戶</h2></div><span class="status-pill" id="bankAsOf">未設定</span></div><div id="bankMetrics" class="bank-metrics"></div><div class="cash-subsection"><h3>待交割</h3><div id="pendingList" class="pending-list"></div></div><div class="cash-subsection"><h3>匯率待確認</h3><div id="fxEstimateList" class="pending-list"></div></div><div class="stack-actions"><button class="button button-soft full" id="editBankButton">更新銀行快照</button><button class="button button-primary full" id="stockFundingButton">記錄新增股票投入</button><button class="button button-soft full" id="transferButton">記錄轉入幣安</button></div></article>
           <article class="card"><div class="card-heading"><div><p class="eyebrow">RECONCILIATION</p><h2>帳本與銀行差額</h2></div></div><div id="reconciliationBridge" class="reconciliation-bridge"></div></article>
           <article class="card"><div class="card-heading"><div><p class="eyebrow">BINANCE</p><h2>幣安資產快照</h2></div><span class="status-pill" id="cryptoAsOf">未設定</span></div><div id="cryptoMetrics" class="bank-metrics"></div><button class="button button-soft full" id="editCryptoButton">更新幣安總資產</button></article>
         </div>
@@ -154,7 +154,7 @@
           <article class="card"><div class="card-heading"><div><p class="eyebrow">CAPITAL</p><h2>信貸與資金來源</h2></div></div><form id="capitalForm" class="form-grid"></form></article>
           <article class="card"><div class="card-heading"><div><p class="eyebrow">MARKET DATA</p><h2>自動更新美股與 BTC</h2></div></div><p class="market-description">使用個人的 Finnhub API 金鑰；只存在這台裝置，不會放進匯出 JSON。開啟 App 時補抓缺少或較舊的美股報價，BTC 每15分鐘可更新一次，台股仍可手動更新。報價可能延遲，以顯示的行情時間為準。</p><form id="marketKeyForm" class="form-grid"><div class="field"><label for="marketKey">Finnhub API 金鑰</label><input id="marketKey" type="password" autocomplete="off" placeholder="貼上金鑰；已設定時可留白"></div><div class="data-actions"><button class="button button-primary" type="submit">儲存並抓取行情</button><button class="button button-soft" type="button" id="removeMarketKey">移除金鑰</button></div></form><p id="marketKeyStatus" class="market-description"></p><a class="market-help" href="https://finnhub.io/register" target="_blank" rel="noopener noreferrer">取得個人 API 金鑰 ↗</a></article>
           <article class="card data-card"><div class="card-heading"><div><p class="eyebrow">DATA</p><h2>資料與備份</h2></div></div><p>所有私人紀錄只存在目前瀏覽器。換手機或清除網站資料前，請先匯出完整JSON。</p><div class="data-actions"><button class="button button-primary" id="exportButton"><span data-icon="download"></span>匯出完整備份</button><button class="button button-soft" id="settingsImportButton"><span data-icon="upload"></span>合併匯入</button><button class="button button-danger" id="resetButton">清除本機資料</button></div></article>
-            <article class="card"><div class="card-heading"><div><p class="eyebrow">ABOUT</p><h2>計算口徑</h2></div></div><ul class="rules"><li>股票採移動平均成本法。</li><li>同一帳戶、代號與幣別的連續持倉，歸零才算一筆完整交易。</li><li>未平倉不計勝率；沒有原始停損時，R multiple維持N/A。</li><li>幣安總損益以「最新資產－累計投入」為主，已實現用完整策略紀錄拆分。</li><li>信貸本金不是虧損；只有利息與手續費列入融資成本。</li></ul><div class="version-row"><span>Wealth Ledger</span><strong>v1.0.9</strong></div></article>
+            <article class="card"><div class="card-heading"><div><p class="eyebrow">ABOUT</p><h2>計算口徑</h2></div></div><ul class="rules"><li>股票採移動平均成本法。</li><li>同一帳戶、代號與幣別的連續持倉，歸零才算一筆完整交易。</li><li>未平倉不計勝率；沒有原始停損時，R multiple維持N/A。</li><li>幣安總損益以「最新資產－累計投入」為主，已實現用完整策略紀錄拆分。</li><li>美股台幣交割在成交時使用暫估匯率，實際交割後再回填台幣金額。</li><li>信貸本金不是虧損；只有利息與手續費列入融資成本。</li></ul><div class="version-row"><span>Wealth Ledger</span><strong>v1.1.0</strong></div></article>
         </div>
       </section>
     </main>
@@ -180,6 +180,8 @@
 
   <dialog id="bankDialog" class="modal-dialog"><form id="bankForm" method="dialog"><div class="dialog-head"><div><p class="eyebrow">RECONCILIATION</p><h2>更新證券戶快照</h2></div><button type="button" class="icon-button" data-close="bankDialog" aria-label="關閉"><span data-icon="x"></span></button></div><div class="form-grid two" id="bankFields"></div><div class="dialog-actions"><button type="button" class="button button-soft" data-close="bankDialog">取消</button><button type="submit" class="button button-primary">更新快照</button></div></form></dialog>
 
+  <dialog id="settlementDialog" class="modal-dialog"><form id="settlementForm" method="dialog"><div class="dialog-head"><div><p class="eyebrow">FINAL SETTLEMENT</p><h2>完成交割</h2></div><button type="button" class="icon-button" data-close="settlementDialog" aria-label="關閉"><span data-icon="x"></span></button></div><div id="settlementSummary" class="settlement-summary"></div><div class="form-grid two" id="settlementFields"></div><p class="section-note">有單筆實際台幣扣款／入帳就填台幣金額；若銀行只提供同日淨額換匯，可改填該批實際匯率。</p><div id="settlementPreview" class="settlement-preview"></div><div class="dialog-actions"><button type="button" class="button button-soft" data-close="settlementDialog">取消</button><button type="submit" class="button button-primary">完成交割</button></div></form></dialog>
+
   <dialog id="stockFundingDialog" class="modal-dialog"><form id="stockFundingForm" method="dialog"><div class="dialog-head"><div><p class="eyebrow">NEW CAPITAL</p><h2>記錄新增股票投入</h2></div><button type="button" class="icon-button" data-close="stockFundingDialog" aria-label="關閉"><span data-icon="x"></span></button></div><div class="form-grid two" id="stockFundingFields"></div><p class="section-note">用於薪資或其他新本金投入；會同步增加長期／波段配置與證券戶餘額，不列為獲利。若只是移動原有配置，請只更新銀行快照。</p><div class="dialog-actions"><button type="button" class="button button-soft" data-close="stockFundingDialog">取消</button><button type="submit" class="button button-primary">儲存新增投入</button></div></form></dialog>
 
   <dialog id="cryptoDialog" class="modal-dialog"><form id="cryptoForm" method="dialog"><div class="dialog-head"><div><p class="eyebrow">BINANCE SNAPSHOT</p><h2>更新幣安總資產</h2></div><button type="button" class="icon-button" data-close="cryptoDialog" aria-label="關閉"><span data-icon="x"></span></button></div><div class="form-grid" id="cryptoFields"></div><div class="dialog-actions"><button type="button" class="button button-soft" data-close="cryptoDialog">取消</button><button type="submit" class="button button-primary">更新快照</button></div></form></dialog>
@@ -192,8 +194,8 @@
 
   <input type="file" id="fileInput" accept="application/json,.json" hidden>
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
-  <script src="ledger.js?v=1.0.9"></script>
-  <script src="market.js?v=1.0.9"></script>
-  <script src="app.js?v=1.0.9"></script>
+  <script src="ledger.js?v=1.1.0"></script>
+  <script src="market.js?v=1.1.0"></script>
+  <script src="app.js?v=1.1.0"></script>
 </body>
 </html>
