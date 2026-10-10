@@ -160,8 +160,8 @@
     window.scrollTo({top:0,behavior:'smooth'});
   }
 
-  function metric(label,value,sub='',valueTone=''){
-    return `<div class="metric-card"><span>${escapeHtml(label)}</span><strong class="${valueTone}">${escapeHtml(value)}</strong>${sub?`<small>${escapeHtml(sub)}</small>`:''}</div>`;
+  function metric(label,value,sub='',valueTone='',action=''){
+    return `<div class="metric-card"${action?` role="button" tabindex="0" data-metric-action="${action}" aria-haspopup="dialog" style="cursor:pointer"`:''}><span>${escapeHtml(label)}</span><strong class="${valueTone}">${escapeHtml(value)}</strong>${sub?`<small>${escapeHtml(sub)}</small>`:''}</div>`;
   }
 
   function render(){
@@ -268,12 +268,33 @@
     return {stock,crypto:p.cryptoTrades,all:[...stock,...p.cryptoTrades]};
   }
 
+
+  function openRealizedDialog(){
+    const p=portfolio();
+    const rows=[
+      ...p.computed.realized.map(t=>({...t,realizedDate:t.date,realizedTwd:t.pnlTwd,description:'賣出 '+money(t.qty,4).replace(/\.?0+$/,'')+' 股',basePnl:t.pnlBase})),
+      ...p.cryptoTrades.map(t=>({...t,realizedDate:t.close,description:'策略結束',basePnl:number(t.pnl)}))
+    ].sort((a,b)=>dateValue(b.realizedDate)-dateValue(a.realizedDate));
+    let dialog=$('realizedDialog');
+    if(!dialog){
+      dialog=document.createElement('dialog');dialog.id='realizedDialog';dialog.className='modal-dialog';
+      dialog.setAttribute('aria-labelledby','realizedDialogTitle');document.body.appendChild(dialog);
+    }
+    const total=rows.reduce((sum,t)=>sum+t.realizedTwd,0);
+    dialog.innerHTML=`<div class="dialog-head"><div><p class="eyebrow">REALIZED P&amp;L</p><h2 id="realizedDialogTitle">已實現損益明細</h2></div><button type="button" class="button button-soft" data-dismiss-realized aria-label="關閉已實現損益明細">關閉</button></div>
+      <div class="metric-grid">${metric('合計',signedMoney(total)+' 元',rows.length+' 筆實現紀錄',tone(total))}</div>
+      <p class="section-note">股票按每筆賣出列出，包含部分賣出；完整平倉才計入交易能力樣本。幣安策略台幣損益沿用績效頁目前換算匯率。</p>
+      <div class="responsive-table"><table><thead><tr><th>實現日</th><th>標的／帳戶</th><th>交易</th><th>原幣損益</th><th>損益 TWD</th></tr></thead><tbody>${rows.length?rows.map(t=>`<tr><td>${escapeHtml(String(t.realizedDate).slice(0,10))}</td><td>${escapeHtml(t.ticker)}<br><small>${escapeHtml(t.account==='crypto'?'幣安':t.account)}</small></td><td>${escapeHtml(t.description)}</td><td class="${tone(t.basePnl)}">${signedMoney(t.basePnl)} ${escapeHtml(t.currency)}</td><td class="${tone(t.realizedTwd)}">${signedMoney(t.realizedTwd)}</td></tr>`).join(''):'<tr><td colspan="5" class="empty-row">尚無已實現損益紀錄</td></tr>'}</tbody></table></div>`;
+    dialog.querySelector('[data-dismiss-realized]').onclick=()=>dialog.close();
+    dialog.showModal();
+  }
+
   function renderPerformance(p){
     const stockTotal=finite(p.stockUnrealized)?p.stockRealized+p.stockUnrealized:NaN;
     const realizedTotal=p.stockRealized+p.cryptoRealized;
     const unrealizedTotal=finite(p.stockUnrealized)&&finite(p.cryptoImplied)?p.stockUnrealized+p.cryptoImplied:NaN;
     $('returnMetrics').innerHTML=[
-      metric('已實現損益',`${signedMoney(realizedTotal)} 元`,`股票 ${signedMoney(p.stockRealized)}・幣安策略 ${signedMoney(p.cryptoRealized)}`,tone(realizedTotal)),
+      metric('已實現損益',`${signedMoney(realizedTotal)} 元`,`股票 ${signedMoney(p.stockRealized)}・幣安策略 ${signedMoney(p.cryptoRealized)}・點擊查看明細`,tone(realizedTotal),'realized'),
       metric('未實現／未拆分',`${signedMoney(unrealizedTotal)} 元`,'股票浮動＋幣安未拆分',tone(unrealizedTotal)),
       metric('全部投資損益',`${signedMoney(p.grossPnl)} 元`,'已實現＋未實現（含幣安）',tone(p.grossPnl)),
       metric('扣融資後淨成果',`${signedMoney(p.netPnl)} 元`,`融資成本 -${money(p.financing)}`,tone(p.netPnl))
@@ -536,6 +557,15 @@
   function toast(message){const node=$('toast');node.textContent=message;node.classList.add('show');clearTimeout(toast.timer);toast.timer=setTimeout(()=>node.classList.remove('show'),2500)}
 
   function bindEvents(){
+    const activateRealized=event=>{
+      const target=event.target.closest('[data-metric-action="realized"]');
+      if(target&&(event.type==='click'||event.key==='Enter'||event.key===' ')){
+        event.preventDefault();openRealizedDialog();
+      }
+    };
+    $('returnMetrics').addEventListener('click',activateRealized);
+    $('returnMetrics').addEventListener('keydown',activateRealized);
+
     all('[data-view]').forEach(button=>button.onclick=()=>showView(button.dataset.view));
     all('[data-go]').forEach(button=>button.onclick=()=>showView(button.dataset.go));
     all('[data-more-view]').forEach(button=>button.onclick=()=>{$('moreDialog').close();showView(button.dataset.moreView)});
