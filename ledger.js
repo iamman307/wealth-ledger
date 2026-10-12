@@ -1,7 +1,7 @@
 /* Wealth Ledger calculation engine. Private account policy lives in imported data. */
 (function(root){
   'use strict';
-  const VERSION='6.14.0';
+  const VERSION='6.15.0';
   const LONG_TERM_TICKERS=Object.freeze([]);
   const DEFAULT_FUND_PLAN=Object.freeze({longTerm:0,swing:0,loan:0,reserve:0,locked:false});
   const CAPITAL_SOURCE_KEYS=Object.freeze(['loan','self','family']);
@@ -264,28 +264,49 @@
     if(!finite(amount)||amount===0||(t.side==='SELL'&&amount<0))throw Error('待交割金額錯誤');
     return {id:'settlement-'+t.id,date:t.date,currency:t.currency,amount,fx,ticker:t.ticker,side:t.side,transactionId:t.id,note:'由交易自動建立；匯率與台幣金額為暫估，交割後請完成核銷。'};
   }
-  function completeTransactionSettlement(data,input){
-    const d=applyPolicy(data),raw=input&&typeof input==='object'&&!Array.isArray(input)?input:{};
-    const transactionId=String(raw.transactionId||''),settledAt=String(raw.settledAt||'');
-    const index=d.transactions.findIndex(t=>t.id===transactionId);
-    if(index<0)throw Error('找不到要完成交割的交易');
-    const transaction=d.transactions[index];
-    if(!['BUY','SELL'].includes(transaction.side))throw Error('只有買進或賣出可以完成交割');
-    if(!settledAt||!Number.isFinite(Date.parse(settledAt)))throw Error('請填寫正確的交割日期');
-    const gross=transaction.qty*transaction.price,fees=(transaction.fee||0)+(transaction.tax||0);
+  function settlementBaseAmount(transaction){
+    const gross=Number(transaction.qty)*Number(transaction.price),fees=Number(transaction.fee||0)+Number(transaction.tax||0);
     const baseAmount=transaction.side==='BUY'?gross+fees:gross-fees;
     if(!finite(baseAmount)||baseAmount<=0)throw Error('交割金額錯誤');
+    return baseAmount;
+  }
+  function completeBatchSettlement(data,input){
+    const d=applyPolicy(data),raw=input&&typeof input==='object'&&!Array.isArray(input)?input:{};
+    const transactionIds=[...new Set((Array.isArray(raw.transactionIds)?raw.transactionIds:[]).map(id=>String(id||'')).filter(Boolean))];
+    const settledAt=String(raw.settledAt||'');
+    if(!transactionIds.length)throw Error('請至少選擇一筆交易');
+    if(!settledAt||!Number.isFinite(Date.parse(settledAt)))throw Error('請填寫正確的交割日期');
+    const indexes=transactionIds.map(id=>d.transactions.findIndex(transaction=>transaction.id===id));
+    if(indexes.some(index=>index<0))throw Error('找不到要完成交割的交易');
+    const transactions=indexes.map(index=>d.transactions[index]);
+    if(transactions.some(transaction=>!['BUY','SELL'].includes(transaction.side)))throw Error('只有買進或賣出可以完成交割');
+    const currencies=new Set(transactions.map(transaction=>transaction.currency));
+    if(currencies.size!==1)throw Error('同一批交割必須使用相同計價幣別');
+    const currency=transactions[0].currency;
+    const baseAmounts=transactions.map(settlementBaseAmount);
+    const netBaseAmount=transactions.reduce((sum,transaction,index)=>sum+(transaction.side==='BUY'?baseAmounts[index]:-baseAmounts[index]),0);
     const enteredTwd=Number(raw.actualTwd),enteredFx=Number(raw.actualFx);
     const hasTwd=finite(enteredTwd)&&enteredTwd>0,hasFx=finite(enteredFx)&&enteredFx>0;
-    if(!hasTwd&&!hasFx)throw Error('請填實際台幣金額或實際匯率');
-    const actualFx=transaction.currency==='TWD'?1:(hasTwd?enteredTwd/baseAmount:enteredFx);
-    const actualTwd=hasTwd?enteredTwd:baseAmount*actualFx;
-    if(!finite(actualFx)||actualFx<=0||!finite(actualTwd)||actualTwd<=0)throw Error('實際交割資料錯誤');
-    d.transactions[index]={...transaction,fx:actualFx,settlementTwd:actualTwd,fxStatus:'final',settledAt};
-    const cash=normalizeSecuritiesCash(d.meta.securitiesCash);
-    cash.pendingSettlements=cash.pendingSettlements.filter(item=>item.transactionId!==transactionId&&item.id!=='settlement-'+transactionId);
+    if(!hasTwd&&!hasFx)throw Error('請填實際台幣淨扣款／入帳或實際匯率');
+    if(hasTwd&&Math.abs(netBaseAmount)<1e-10)throw Error('這批交易的買賣淨額為 0，請改填實際匯率');
+    const actualFx=currency==='TWD'?1:(hasTwd?enteredTwd/Math.abs(netBaseAmount):enteredFx);
+    if(currency==='TWD'&&hasTwd&&!closeEnough(enteredTwd,Math.abs(netBaseAmount)))throw Error('台幣交易的實際金額與買賣淨額不一致');
+    if(!finite(actualFx)||actualFx<=0)throw Error('實際交割資料錯誤');
+    indexes.forEach((index,itemIndex)=>{
+      const transaction=d.transactions[index];
+      d.transactions[index]={...transaction,fx:actualFx,settlementTwd:baseAmounts[itemIndex]*actualFx,fxStatus:'final',settledAt};
+    });
+    const selectedIds=new Set(transactionIds),cash=normalizeSecuritiesCash(d.meta.securitiesCash);
+    cash.pendingSettlements=cash.pendingSettlements.filter(item=>{
+      const transactionId=item.transactionId||(item.id.startsWith('settlement-')?item.id.slice('settlement-'.length):'');
+      return !selectedIds.has(transactionId);
+    });
     d.meta.securitiesCash=cash;
     return applyPolicy(d);
+  }
+  function completeTransactionSettlement(data,input){
+    const raw=input&&typeof input==='object'&&!Array.isArray(input)?input:{};
+    return completeBatchSettlement(data,{...raw,transactionIds:[String(raw.transactionId||'')]});
   }
   function externalFundingTwd(data){
     const seen=new Set();let total=0;
@@ -470,7 +491,7 @@
     const aw=avg(ratedWins),al=Math.abs(avg(ratedLosses));
     return {count:completed.length,returnCount:rated.length,winRate:completed.length?wins.length/completed.length*100:NaN,avgWin:aw,avgLoss:al,payoff:al>0?aw/al:NaN,expectancy:avg(rated)};
   }
-  const api={VERSION,LONG_TERM_TICKERS,DEFAULT_FUND_PLAN,DEFAULT_CAPITAL_TRACKING,DEFAULT_SECURITIES_CASH,CAPITAL_SOURCE_KEYS,validate,compute,merge,stats,moneyStats,sameManual,manualKey,classifyAccount,normalizeFundPlan,normalizeCapitalTracking,normalizeSecuritiesCash,parseCapitalSetup,applyPolicy,fundSummary,securitiesCashSummary,externalFundingTwd,capitalSummary,transactionValueTwd,pendingSettlementFromTransaction,completeTransactionSettlement,recordExternalInvestmentTransfer,recordSecuritiesContribution};
+  const api={VERSION,LONG_TERM_TICKERS,DEFAULT_FUND_PLAN,DEFAULT_CAPITAL_TRACKING,DEFAULT_SECURITIES_CASH,CAPITAL_SOURCE_KEYS,validate,compute,merge,stats,moneyStats,sameManual,manualKey,classifyAccount,normalizeFundPlan,normalizeCapitalTracking,normalizeSecuritiesCash,parseCapitalSetup,applyPolicy,fundSummary,securitiesCashSummary,externalFundingTwd,capitalSummary,transactionValueTwd,pendingSettlementFromTransaction,completeBatchSettlement,completeTransactionSettlement,recordExternalInvestmentTransfer,recordSecuritiesContribution};
   if(typeof module!=='undefined'&&module.exports)module.exports=api;
   root.Ledger=api;
 })(typeof globalThis!=='undefined'?globalThis:this);

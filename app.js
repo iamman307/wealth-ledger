@@ -1,9 +1,9 @@
 (() => {
   'use strict';
-  const APP_VERSION = '1.1.0';
+  const APP_VERSION = '1.2.0';
   const STORAGE_KEY = 'wealth-ledger-db-v1';
   const MARKET_KEY = 'wealth-ledger-finnhub-key-v1';
-  const state = { view: 'overview', holdingFilter: 'all', transactionFilter: 'all', performanceMode: 'returns', performanceScope: 'all', settlementTransactionId: '', demo: false };
+  const state = { view: 'overview', holdingFilter: 'all', transactionFilter: 'all', performanceMode: 'returns', performanceScope: 'all', settlementTransactionIds: [], demo: false };
   let quoteRefreshInFlight = false;
   let installPrompt = null;
   let db;
@@ -325,11 +325,32 @@
     const s=p.securities;
     $('bankAsOf').textContent=s.configured?s.asOf.slice(0,10):'未設定';
     $('bankMetrics').innerHTML=[['帳面餘額',s.accountBalanceTwd],['已圈存',-s.reservedTwd],['目前可用',s.availableTwd],['待交割',s.pendingTwd],['交割後預估',s.postSettlementTwd],['累計轉至幣安',-p.cryptoFunding]].map(x=>`<div><span>${x[0]}</span><strong class="${tone(x[1])}">${signedMoney(x[1])}</strong></div>`).join('');
-    const pendingIds=new Set(s.pendingSettlements.map(item=>item.transactionId||(item.id.startsWith('settlement-')?item.id.slice('settlement-'.length):'')));
-    $('pendingList').innerHTML=s.pendingSettlements.length?s.pendingSettlements.map(item=>{const transactionId=item.transactionId||(item.id.startsWith('settlement-')?item.id.slice('settlement-'.length):'');return `<div class="pending-item"><span class="pending-copy"><strong>${escapeHtml(item.ticker||'未命名')}・${item.side==='BUY'?'買進':'賣出'}</strong><small>${escapeHtml(item.date.slice(0,16).replace('T',' '))}・暫估匯率 ${money(item.fx,4)}</small></span><span class="pending-actions"><strong class="${tone(item.amount*item.fx)}">${signedMoney(item.amount*item.fx)}</strong>${transactionId?`<button class="button button-soft button-compact" data-settle-id="${escapeHtml(transactionId)}">完成</button>`:''}</span></div>`}).join(''):'<div class="empty-row">目前沒有待交割款</div>';
-    const estimates=db.transactions.filter(transaction=>transaction.fxStatus==='estimate'&&['BUY','SELL'].includes(transaction.side)&&!pendingIds.has(transaction.id)).sort((a,b)=>dateValue(b.date)-dateValue(a.date));
-    $('fxEstimateList').innerHTML=estimates.length?estimates.map(transaction=>`<div class="pending-item"><span class="pending-copy"><strong>${escapeHtml(transaction.ticker)}・${transaction.side==='BUY'?'買進':'賣出'}</strong><small>${escapeHtml(transaction.date.slice(0,16).replace('T',' '))}・暫估匯率 ${money(transaction.fx,4)}</small></span><span class="pending-actions"><strong>${money(Ledger.transactionValueTwd(transaction))}</strong><button class="button button-soft button-compact" data-settle-id="${escapeHtml(transaction.id)}">核銷</button></span></div>`).join(''):'<div class="empty-row">沒有待確認匯率</div>';
-    all('[data-settle-id]').forEach(button=>button.onclick=()=>openSettlementDialog(button.dataset.settleId));
+    const pendingByTransaction=new Map(),legacyPending=[];
+    for(const item of s.pendingSettlements){
+      const transactionId=item.transactionId||(item.id.startsWith('settlement-')?item.id.slice('settlement-'.length):'');
+      if(transactionId&&db.transactions.some(transaction=>transaction.id===transactionId))pendingByTransaction.set(transactionId,item);
+      else legacyPending.push(item);
+    }
+    const candidates=db.transactions.filter(transaction=>['BUY','SELL'].includes(transaction.side)&&(transaction.fxStatus==='estimate'||pendingByTransaction.has(transaction.id))).map(transaction=>({transaction,pending:pendingByTransaction.get(transaction.id)})).sort((a,b)=>dateValue(b.transaction.date)-dateValue(a.transaction.date));
+    const candidateRows=candidates.map(({transaction,pending})=>{
+      const signedTwd=(transaction.side==='BUY'?-1:1)*(pending?Math.abs(pending.amount*pending.fx):Ledger.transactionValueTwd(transaction));
+      const status=pending?'待銀行扣款／入帳':'只待確認匯率';
+      return `<div class="pending-item settlement-item"><label class="settlement-select"><input type="checkbox" data-settlement-select="${escapeHtml(transaction.id)}"><span class="pending-copy"><strong>${escapeHtml(transaction.ticker)}・${transaction.side==='BUY'?'買進':'賣出'} ${money(transaction.qty,4)} 股</strong><small>${escapeHtml(transaction.date.slice(0,16).replace('T',' '))}・${status}・暫估匯率 ${money(transaction.fx,4)}</small></span></label><span class="pending-actions"><strong class="${tone(signedTwd)}">${signedMoney(signedTwd)}</strong><button class="button button-soft button-compact" data-settle-id="${escapeHtml(transaction.id)}">單筆</button></span></div>`;
+    });
+    const legacyRows=legacyPending.map(item=>`<div class="pending-item"><span class="pending-copy"><strong>${escapeHtml(item.ticker||'舊待交割資料')}</strong><small>${escapeHtml(item.date.slice(0,16).replace('T',' '))}・未連結交易，請更新銀行快照後由備份修正</small></span><span class="pending-actions"><strong class="${tone(item.amount*item.fx)}">${signedMoney(item.amount*item.fx)}</strong></span></div>`);
+    $('settlementList').innerHTML=candidateRows.length||legacyRows.length?[...candidateRows,...legacyRows].join(''):'<div class="empty-row">目前沒有待完成交割</div>';
+    const updateBatchButton=()=>{
+      const selected=all('[data-settlement-select]:checked');
+      $('batchSettlementButton').disabled=!selected.length;
+      $('batchSettlementButton').textContent=selected.length?`整批完成（${selected.length}）`:'整批完成';
+      $('selectAllSettlements').textContent=selected.length&&selected.length===candidates.length?'取消全選':'全選';
+    };
+    all('[data-settlement-select]').forEach(input=>input.onchange=updateBatchButton);
+    all('[data-settle-id]').forEach(button=>button.onclick=()=>openSettlementDialog([button.dataset.settleId]));
+    $('selectAllSettlements').disabled=!candidates.length;
+    $('selectAllSettlements').onclick=()=>{const inputs=all('[data-settlement-select]'),check=!inputs.length?false:!inputs.every(input=>input.checked);inputs.forEach(input=>{input.checked=check});updateBatchButton()};
+    $('batchSettlementButton').onclick=()=>openSettlementDialog(all('[data-settlement-select]:checked').map(input=>input.dataset.settlementSelect));
+    updateBatchButton();
     const model=p.funds.investmentAvailable; const gap=s.configured?model-s.postSettlementTwd:NaN;
     $('reconciliationBridge').innerHTML=`<div class="reconcile-row"><span>長期策略可動用</span><strong>${money(p.funds.buckets['長期'].available)}</strong></div><div class="reconcile-row"><span>波段股票可動用</span><strong>${money(p.funds.swingAvailableTwd)}</strong></div><div class="reconcile-row"><span>歷史現金校正</span><strong class="${tone(p.funds.cashAdjustmentTwd)}">${signedMoney(p.funds.cashAdjustmentTwd)}</strong></div><div class="reconcile-row total"><span>股票配置模型</span><strong>${money(model)}</strong></div><div class="reconcile-row"><span>銀行交割後預估</span><strong>${money(s.postSettlementTwd)}</strong></div><div class="reconcile-row total"><span>待對帳差額</span><strong class="${tone(gap)}">${signedMoney(gap)}</strong></div>`;
     $('cryptoAsOf').textContent=p.crypto.asOf?p.crypto.asOf.slice(0,10):'未設定';
@@ -432,19 +453,29 @@
     }catch(error){showNotice(error.message,'error')}
   }
 
-  function openSettlementDialog(transactionId){
-    const transaction=db.transactions.find(item=>item.id===transactionId);
-    if(!transaction){showNotice('找不到這筆交易','error');return;}
-    const fees=(transaction.fee||0)+(transaction.tax||0),gross=transaction.qty*transaction.price;
-    const baseAmount=transaction.side==='BUY'?gross+fees:gross-fees;
-    state.settlementTransactionId=transaction.id;
-    $('settlementSummary').innerHTML=`<strong>${escapeHtml(transaction.ticker)}・${transaction.side==='BUY'?'買進':'賣出'} ${money(transaction.qty,4)} 股</strong><small>${money(baseAmount,2)} ${escapeHtml(transaction.currency)}・目前暫估匯率 ${money(transaction.fx,4)}・約 NT$${money(baseAmount*transaction.fx)}</small>`;
-    $('settlementFields').innerHTML=`${inputField('settlementDate','實際交割時間',isoLocal(),'datetime-local','required')}${inputField('settlementActualTwd','實際台幣扣款／入帳','', 'number','step="any" min="0" placeholder="有單筆金額時填這裡"')}${inputField('settlementActualFx','實際匯率（擇一填）','', 'number','step="any" min="0" placeholder="淨額換匯時可填批次匯率"')}`;
+  function openSettlementDialog(transactionIds){
+    const ids=[...new Set((Array.isArray(transactionIds)?transactionIds:[transactionIds]).filter(Boolean))];
+    const transactions=ids.map(id=>db.transactions.find(item=>item.id===id)).filter(Boolean);
+    if(!transactions.length||transactions.length!==ids.length){showNotice('找不到選取的交易','error');return;}
+    const currencies=new Set(transactions.map(transaction=>transaction.currency));
+    if(currencies.size!==1){showNotice('同一批請只選擇相同計價幣別','error');return;}
+    const baseAmounts=transactions.map(transaction=>{const fees=(transaction.fee||0)+(transaction.tax||0),gross=transaction.qty*transaction.price;return transaction.side==='BUY'?gross+fees:gross-fees});
+    const netBaseAmount=transactions.reduce((sum,transaction,index)=>sum+(transaction.side==='BUY'?baseAmounts[index]:-baseAmounts[index]),0);
+    const direction=netBaseAmount>=0?'扣款':'入帳',currency=transactions[0].currency;
+    state.settlementTransactionIds=ids;
+    if(transactions.length===1){
+      const transaction=transactions[0];
+      $('settlementSummary').innerHTML=`<strong>${escapeHtml(transaction.ticker)}・${transaction.side==='BUY'?'買進':'賣出'} ${money(transaction.qty,4)} 股</strong><small>${money(baseAmounts[0],2)} ${escapeHtml(currency)}・目前暫估匯率 ${money(transaction.fx,4)}</small>`;
+    }else{
+      const tickers=[...new Set(transactions.map(transaction=>transaction.ticker))].join('、');
+      $('settlementSummary').innerHTML=`<strong>${transactions.length} 筆一起完成・銀行應為${direction}</strong><small>${escapeHtml(tickers)}・${escapeHtml(currency)} 買賣淨額 ${money(Math.abs(netBaseAmount),3)}・只需輸入一次銀行實際${direction}</small>`;
+    }
+    $('settlementFields').innerHTML=`${inputField('settlementDate','實際交割時間',isoLocal(),'datetime-local','required')}${inputField('settlementActualTwd',`銀行實際${direction}（TWD）`,'', 'number',`step="any" min="0" placeholder="例如 ${transactions.length>1?'41338':'實際金額'}"`)}${inputField('settlementActualFx','實際匯率（擇一填）','', 'number','step="any" min="0" placeholder="沒有淨額時才需要"')}`;
     const updatePreview=()=>{
       const actualTwd=number($('settlementActualTwd').value,NaN),actualFx=number($('settlementActualFx').value,NaN);
-      const fx=actualTwd>0?actualTwd/baseAmount:actualFx;
-      const twd=actualTwd>0?actualTwd:actualFx>0?baseAmount*actualFx:NaN;
-      $('settlementPreview').textContent=finite(fx)&&finite(twd)?`完成後：實際匯率 ${money(fx,4)}・台幣金額 NT$${money(twd)}`:'填寫任一項後，這裡會試算最終匯率與台幣金額。';
+      const fx=actualTwd>0&&Math.abs(netBaseAmount)>1e-10?actualTwd/Math.abs(netBaseAmount):actualFx;
+      const twd=actualTwd>0?actualTwd:actualFx>0?Math.abs(netBaseAmount)*actualFx:NaN;
+      $('settlementPreview').textContent=finite(fx)&&finite(twd)?`完成後：整批實際匯率 ${money(fx,6)}・銀行${direction} NT$${money(twd)}`:'輸入一次銀行實際淨額，這裡會反算整批共同匯率。';
     };
     $('settlementActualTwd').oninput=updatePreview;$('settlementActualFx').oninput=updatePreview;updatePreview();
     $('settlementDialog').showModal();
@@ -453,9 +484,10 @@
   function saveSettlement(event){
     event.preventDefault();const f=new FormData(event.currentTarget);
     try{
-      db=Ledger.completeTransactionSettlement(db,{transactionId:state.settlementTransactionId,settledAt:String(f.get('settlementDate')),actualTwd:number(f.get('settlementActualTwd'),NaN),actualFx:number(f.get('settlementActualFx'),NaN)});
-      const transaction=db.transactions.find(item=>item.id===state.settlementTransactionId);
-      state.settlementTransactionId='';$('settlementDialog').close();saveDb(`${transaction.ticker} 交割已完成，實際匯率 ${money(transaction.fx,4)}`);
+      const ids=[...state.settlementTransactionIds];
+      db=Ledger.completeBatchSettlement(db,{transactionIds:ids,settledAt:String(f.get('settlementDate')),actualTwd:number(f.get('settlementActualTwd'),NaN),actualFx:number(f.get('settlementActualFx'),NaN)});
+      const transaction=db.transactions.find(item=>item.id===ids[0]);
+      state.settlementTransactionIds=[];$('settlementDialog').close();saveDb(`${ids.length} 筆交割已一起完成，實際匯率 ${money(transaction.fx,6)}`);
     }catch(error){showNotice(error.message,'error')}
   }
 
